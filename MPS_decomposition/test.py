@@ -11,7 +11,7 @@ import pstats
 import numpy as np
 
 # import the path to the package
-project_dir = abspath(join(dirname(__file__), '/Users/pauliebao/Tensor_play_ground/'))
+project_dir = abspath(join(dirname(__file__), '/Users/pauliebao/Tensor_play_ground/MPS_decomposition/'))
 sys.path.insert(0, project_dir)
 
 # local import
