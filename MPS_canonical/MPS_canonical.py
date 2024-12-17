@@ -54,7 +54,7 @@ class MPS_canonical(object):
 
     def left_canonical(self):
         """procedure to bring the MPS into left canonical form"""
-        def _local_caonical(input_tensor):
+        def _local_canonical(input_tensor):
             """produce left-canonical matrix at each site"""
             left_bond_dim, phys_dim, right_bond_dim = input_tensor.shape
             # reshape the input tensor into the shape (left_bond_dim * phys_dim, right_bond_dim)
@@ -62,6 +62,11 @@ class MPS_canonical(object):
             # SVD the reshaped tensor
             A, S, Vh = np.linalg.svd(input_tensor, full_matrices=False)
             # reshape the decomposed tensor in to the original shape
+            # change right bond dimension for base cases
+            if left_bond_dim == 1:
+                right_bond_dim = min(phys_dim, right_bond_dim)
+            else:
+                pass
             output_tensor = A.reshape(left_bond_dim, phys_dim, right_bond_dim)
 
             return output_tensor, S, Vh
@@ -76,7 +81,7 @@ class MPS_canonical(object):
             else:
                 input_tensor = np.einsum('s,sa,aib->sib', S, V, self.input_MPS[site])
 
-            A, S, V = _local_caonical(input_tensor)
+            A, S, V = _local_canonical(input_tensor)
 
             # site the decomponsed tensor at each site
             self.left_canonical_MPS[site] = A
@@ -95,7 +100,7 @@ class MPS_canonical(object):
 
     def right_canonical(self):
         """procedure to bring the MPS into right-canonical form"""
-        def _local_caonical(input_tensor):
+        def _local_canonical(input_tensor):
             """produce left-canonical matrix at each site"""
             left_bond_dim, phys_dim, right_bond_dim = input_tensor.shape
             # reshape the input tensor into the shape (left_bond_dim * phys_dim, right_bond_dim)
@@ -103,6 +108,11 @@ class MPS_canonical(object):
             # SVD the reshaped tensor
             U, S, B = np.linalg.svd(input_tensor, full_matrices=False)
             # reshape the decomposed tensor in to the original shape
+            # change left bond dimension for base cases
+            if right_bond_dim == 1:
+                left_bond_dim = min(phys_dim, left_bond_dim)
+            else:
+                pass
             output_tensor = B.reshape(left_bond_dim, phys_dim, right_bond_dim)
 
             return output_tensor, S, U
@@ -118,7 +128,7 @@ class MPS_canonical(object):
             else:
                 input_tensor = np.einsum('aib,bs,s->ais', self.input_MPS[site], U, S)
 
-            B, S, U = _local_caonical(input_tensor)
+            B, S, U = _local_canonical(input_tensor)
 
             # site the decomponsed tensor at each site
             self.right_canonical_MPS[site] = B
