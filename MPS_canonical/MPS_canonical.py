@@ -50,7 +50,7 @@ class MPS_canonical(object):
         for site in self.input_MPS.keys():
             print("site:{:}".format(site+1))
             print("MPS matrix shape:{:}".format(self.input_MPS[site].shape))
-            print("MPS matrix:\n{:}".format(self.input_MPS[site]))
+            # print("MPS matrix:\n{:}".format(self.input_MPS[site]))
 
     def left_canonical(self, input_MPS=0):
         """procedure to bring the MPS into left canonical form"""
@@ -77,7 +77,7 @@ class MPS_canonical(object):
             pass
 
         D, d, L = self.D, self.d, self.L
-        self.left_canonical_MPS = {}
+        left_canonical_MPS = {}
         # loop over each site of the MPS to form left-canonical MPS
         for site in range(L):
             # base case
@@ -89,19 +89,19 @@ class MPS_canonical(object):
             A, S, V = _local_canonical(input_tensor)
 
             # site the decomponsed tensor at each site
-            self.left_canonical_MPS[site] = A
+            left_canonical_MPS[site] = A
 
         # check if the procedure produce the lelf-canonical MPS
         print("Left canonical MPS:")
         for site in range(L):
-            tensor = self.left_canonical_MPS[site]
+            tensor =left_canonical_MPS[site]
             left_bond_dim, phys_dim, right_bond_dim = tensor.shape
             assert np.allclose(np.einsum('bia,bic->ac', tensor, tensor), np.eye(right_bond_dim))
             print("Site {:}:".format(site+1))
-            print("shape:{:}".format(self.left_canonical_MPS[site].shape))
-            print("tensor:\n{:}".format(self.left_canonical_MPS[site]))
+            print("shape:{:}".format(left_canonical_MPS[site].shape))
+            # print("tensor:\n{:}".format(self.left_canonical_MPS[site]))
 
-        return self.left_canonical_MPS
+        return left_canonical_MPS
 
     def right_canonical(self, input_MPS=0):
         """procedure to bring the MPS into right-canonical form"""

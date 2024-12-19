@@ -34,7 +34,7 @@ class MPS_compression(MPS_canonical):
         super(MPS_compression, self).__init__(D, d, L)
 
         # call the subroutine to bring te initial MPS into left canonical form
-        self.left_canonical(self.input_MPS)
+        self.left_canonical_MPS = self.left_canonical(self.input_MPS)
 
     def SVD_compress(self):
         """
@@ -64,8 +64,8 @@ class MPS_compression(MPS_canonical):
             output_tensor = B_truncate.reshape(truncation, phys_dim, right_bond_dim)
 
             # print for debug propurse
-            print("original single value at site {:}:\n{:}".format(i+1, S))
-            print("compressed single value at site {:}:\n{:}".format(i+1, S_truncate))
+            # print("original single value at site {:}:\n{:}".format(i+1, S))
+            # print("compressed single value at site {:}:\n{:}".format(i+1, S_truncate))
 
             return output_tensor, U_truncate, S_truncate
 
@@ -75,9 +75,9 @@ class MPS_compression(MPS_canonical):
             site = L-i-1
             # calcuate input tensor to perform SVD at each site
             if site == L-1:
-                M = self.left_canonical_MPS[site]
+                M = self.left_canonical_MPS[site].copy()
             else:
-                M = np.einsum('iaj,jk,k->iak',self.left_canonical_MPS[site], U_tilde, S_tilde)
+                M = np.einsum('iaj,jk,k->iak',self.left_canonical_MPS[site], U_tilde, S_tilde).copy()
 
             # perform compression at each site
             B_tilde, U_tilde, S_tilde = _local_compression(M, site)
@@ -86,6 +86,7 @@ class MPS_compression(MPS_canonical):
             self.SVD_compressed_MPS[site] = B_tilde
 
         # print and check the compressed tensor for debuging purpose
+        print("SVD compressed tensor:")
         for site in range(L):
             tensor = self.SVD_compressed_MPS[site]
             left_bond_dim, phys_dim, right_bond_dim = tensor.shape
@@ -102,9 +103,12 @@ class MPS_compression(MPS_canonical):
         """implement method that compress a MPS from variational optimize the matrix parameterize on each site"""
         def _local_compression(decomposed_MPS, site):
             """variationally compress the MPS at each local site"""
-            def _contract(input_tensor, input_MPS, site_i):
+            def _contract(input_tensor, input_MPS, site_i, right=False):
                 """calculate overlaps at each local site"""
-                output_tensor = np.einsum('ik,iaj,kal->jl',input_tensor, self.left_canonical_MPS[site_i], input_MPS[site_i])
+                if right:
+                    output_tensor = np.einsum('ik,jai,lak->jl',input_tensor, self.left_canonical_MPS[site_i], input_MPS[site_i])
+                else:
+                    output_tensor = np.einsum('ik,iaj,kal->jl',input_tensor, self.left_canonical_MPS[site_i], input_MPS[site_i])
                 return output_tensor
 
             def _cal_left_tensor():
@@ -112,7 +116,7 @@ class MPS_compression(MPS_canonical):
                 # loop over all MPS tensors to the left
                 for i in range(site):
                     if i == 0:
-                        left_tensor = np.einsum('jai,jak->ik', self.left_canonical_MPS[i], decomposed_MPS[i]).copy()
+                        left_tensor = np.einsum('iaj,iak->jk', self.left_canonical_MPS[i], decomposed_MPS[i]).copy()
                     else:
                         left_tensor = _contract(left_tensor, decomposed_MPS, i).copy()
 
@@ -124,19 +128,20 @@ class MPS_compression(MPS_canonical):
                 for i in range(site+1, L):
                     site_i = L + site - i # start from the right most tensor
                     if site_i == L-1:
-                        right_tensor = np.einsum('jai,jak->ik', self.left_canonical_MPS[site_i], decomposed_MPS[site_i]).copy()
+                        right_tensor = np.einsum('iaj,kaj->ik', self.left_canonical_MPS[site_i], decomposed_MPS[site_i]).copy()
+                        print(right_tensor.shape)
                     else:
-                        right_tensor = _contract(right_tensor, decomposed_MPS, site_i).copy()
+                        right_tensor = _contract(right_tensor, decomposed_MPS, site_i, right=True).copy()
 
                 return right_tensor
 
             # handle edge cases
             if site == 0:
                 R_tensor = _cal_right_tensor()
-                output_tensor = np.einsum('ij,kaj->kai', R_tensor, self.left_canonical_MPS[site])
+                output_tensor = np.einsum('ji,kaj->kai', R_tensor, self.left_canonical_MPS[site])
             elif site == L-1:
                 L_tensor = _cal_left_tensor()
-                output_tensor = np.einsum('ij,jak->iak', L_tensor, self.left_canonical_MPS[site])
+                output_tensor = np.einsum('ji,jak->iak', L_tensor, self.left_canonical_MPS[site])
             else:
                 # calculate left tensor
                 L_tensor = _cal_left_tensor()
@@ -144,7 +149,7 @@ class MPS_compression(MPS_canonical):
                 R_tensor = _cal_right_tensor()
 
                 # calculate variational optimized local MPS tensor
-                output_tensor = np.einsum('ij,kl,jal->iak', L_tensor, R_tensor, self.left_canonical_MPS[site])
+                output_tensor = np.einsum('ji,lk,jal->iak', L_tensor, R_tensor, self.left_canonical_MPS[site])
 
             return output_tensor
 
@@ -165,14 +170,11 @@ class MPS_compression(MPS_canonical):
 
             return output_tensor, S, U
 
+        print("***Start tensor compression procedure")
+
         D, d, L, D_truncate = self.D, self.d, self.L, self.D_truncate
         # using SVD compressed tensor as an initial guess
         initial_MPS = self.SVD_compress()
-        if False:
-            # print for debug purpose
-            for site in initial_MPS.keys():
-                print("site: {:}".format(site+1))
-                print("shape of the tensor:{:}".format(initial_MPS[site].shape))
         # bring the SVD compressed tesnor into a left canonical form
         initial_MPS = self.left_canonical(initial_MPS)
 
@@ -207,5 +209,24 @@ class MPS_compression(MPS_canonical):
 
                 # variationally compress MPS at each local site
                 self.iterative_decomposed_MPS[local_site] = _local_compression(local_decomposed_MPS, local_site-1)
+
+        if True:
+            # print for debug purpose
+            print("Initial guess of the MPS (obtained from svd)")
+            for site in initial_MPS.keys():
+                print("site: {:}".format(site+1))
+                print("shape of the tensor:{:}".format(initial_MPS[site].shape))
+
+            print("Original MPS")
+            for site in self.left_canonical_MPS.keys():
+                print("site: {:}".format(site+1))
+                print("shape of the tensor:{:}".format(self.left_canonical_MPS[site].shape))
+
+            print("Compressed tensor:")
+            for site in self.iterative_decomposed_MPS.keys():
+                print("site: {:}".format(site+1))
+                print("shape of the tensor:{:}".format(self.iterative_decomposed_MPS[site].shape))
+
+        print("***Tensor compression procedure terminate")
 
         return
