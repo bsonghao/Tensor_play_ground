@@ -21,12 +21,13 @@ def main():
     """main function for MPS decomposition algorithm"""
     # input tensor shape
     bond_dimension = 6
-    truncated_bond_dimension = 3
+    truncated_bond_dimension = 2
     num_state = 4
-    num_site = 5
+    num_site = 10
 
     tensor = MPS_compression(bond_dimension, num_state, num_site, truncated_bond_dimension)
-    tensor.SVD_compress()
+    # tensor.SVD_compress()
+    tensor.iterative_compress()
 
     return
 

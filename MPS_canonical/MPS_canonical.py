@@ -52,7 +52,7 @@ class MPS_canonical(object):
             print("MPS matrix shape:{:}".format(self.input_MPS[site].shape))
             print("MPS matrix:\n{:}".format(self.input_MPS[site]))
 
-    def left_canonical(self):
+    def left_canonical(self, input_MPS=0):
         """procedure to bring the MPS into left canonical form"""
         def _local_canonical(input_tensor):
             """produce left-canonical matrix at each site"""
@@ -71,15 +71,20 @@ class MPS_canonical(object):
 
             return output_tensor, S, Vh
 
+        if False:
+            input_MPS = self.input_MPS
+        else:
+            pass
+
         D, d, L = self.D, self.d, self.L
         self.left_canonical_MPS = {}
         # loop over each site of the MPS to form left-canonical MPS
         for site in range(L):
             # base case
             if site == 0:
-                input_tensor = self.input_MPS[site]
+                input_tensor = input_MPS[site]
             else:
-                input_tensor = np.einsum('s,sa,aib->sib', S, V, self.input_MPS[site])
+                input_tensor = np.einsum('s,sa,aib->sib', S, V, input_MPS[site])
 
             A, S, V = _local_canonical(input_tensor)
 
@@ -96,12 +101,12 @@ class MPS_canonical(object):
             print("shape:{:}".format(self.left_canonical_MPS[site].shape))
             print("tensor:\n{:}".format(self.left_canonical_MPS[site]))
 
-        return
+        return self.left_canonical_MPS
 
-    def right_canonical(self):
+    def right_canonical(self, input_MPS=0):
         """procedure to bring the MPS into right-canonical form"""
         def _local_canonical(input_tensor):
-            """produce left-canonical matrix at each site"""
+            """produce right-canonical matrix at each site"""
             left_bond_dim, phys_dim, right_bond_dim = input_tensor.shape
             # reshape the input tensor into the shape (left_bond_dim * phys_dim, right_bond_dim)
             input_tensor = input_tensor.reshape(left_bond_dim, right_bond_dim*phys_dim)
@@ -117,6 +122,11 @@ class MPS_canonical(object):
 
             return output_tensor, S, U
 
+        if True:
+            input_MPS = self.input_MPS
+        else:
+            pass
+
         D, d, L = self.D, self.d, self.L
         self.right_canonical_MPS = {}
         # loop over each site of the MPS to form left-canonical MPS
@@ -124,9 +134,9 @@ class MPS_canonical(object):
             site = L-i-1
             # base case
             if site == L-1:
-                input_tensor = self.input_MPS[site]
+                input_tensor = input_MPS[site]
             else:
-                input_tensor = np.einsum('aib,bs,s->ais', self.input_MPS[site], U, S)
+                input_tensor = np.einsum('aib,bs,s->ais', input_MPS[site], U, S)
 
             B, S, U = _local_canonical(input_tensor)
 
@@ -143,4 +153,4 @@ class MPS_canonical(object):
             print("shape:{:}".format(self.right_canonical_MPS[site].shape))
             print("tensor:\n{:}".format(self.right_canonical_MPS[site]))
 
-        return
+        return self.right_canonical_MPS
