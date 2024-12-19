@@ -20,7 +20,7 @@ from MPS_decompose import MPS_decompose
 def main():
     """main function for MPS decomposition algorithm"""
     # input tensor shape
-    num_site = 4
+    num_site = 6
     num_state = 3
 
     tensor = MPS_decompose(num_site, num_state)
