@@ -26,7 +26,7 @@ def main():
 
     tensor = MPS_canonical(bond_dimension, num_state, num_site)
     tensor.left_canonical()
-    tensor.right_canonical()
+    # tensor.right_canonical()
 
     return
 

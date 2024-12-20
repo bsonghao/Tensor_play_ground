@@ -96,13 +96,13 @@ class MPS_decompose(object):
             print("Shape of Vh:{:}".format(Vh.shape))
             print("shape of PSI:{:}".format(PSI.shape))
 
-        # the right most MPS tensor should be PSI itself?
+        # the right most MPS tensor should be PSI itself
         MPS_tensor[L-1] = PSI
 
         # reshape MPS tensors
         for site in range(L):
             if site != 0 and site != L-1:
-                MPS_tensor[site] = MPS_tensor[site].reshape(r[site-1], D, r[site])
+                MPS_tensor[site] = MPS_tensor[site].reshape(r[site-1], D, r[site]) # shape should be (left_bond_dim, phys_dim, right_bond_dim)
             # introduce dummy index at the edges
             elif site == 0:
                 phys_dim, right_bond_dim = MPS_tensor[site].shape
@@ -118,5 +118,68 @@ class MPS_decompose(object):
             assert np.allclose(np.einsum('iaj,iak->jk', MPS_tensor[site], MPS_tensor[site]), np.eye(MPS_tensor[site].shape[2]))
         # store the decompose MPS tensor as an globally
         self.MPS_tensor_left = MPS_tensor
+
+        return
+
+    def right_decompose(self):
+        """algorithm to decompose the tensor to MPS from the left"""
+        L, D = self.L, self.D
+
+        # define an empty dictionary to store MPS tensor from left to the right
+        MPS_tensor = {}
+
+        # sweep from left to right to construct MPS tensors
+        PSI = self.input_tensor.copy()
+        # store bond dimension data
+        r = {} # initial bond dimension
+        for i in range(L-1):
+            site = L - i -1
+            # reshape the tensor for SVD
+            if site == L-1:
+                PSI = PSI.reshape(D**(L-1), D)
+            else:
+                print(PSI.shape)
+                PSI = PSI.reshape(D**(site), r[site+1]*D)
+            # perform SVD
+            U, S, Vh = np.linalg.svd(PSI, full_matrices=False)
+            r[site]=len(S) # update bond dimension
+            # normalize U for numerical stability
+            # U /= np.linalg.norm(U, axis=0)
+            # append the leftmost tensor to MPS
+            MPS_tensor[site] = Vh
+
+            # update PSI for the next site
+            PSI = np.dot(U, np.diag(S))
+
+            # debugging print statements
+            print("MPS for site {:}:".format(site+1))
+            print("Shape of U:{:}".format(MPS_tensor[site].shape))
+            print("shape of S:{:}".format(S.shape))
+            print("SVD values:\n{:}".format(S))
+            print("Shape of Vh:{:}".format(Vh.shape))
+            print("shape of PSI:{:}".format(PSI.shape))
+
+        # the left most MPS tensor should be PSI itself
+        MPS_tensor[0] = PSI
+
+        # reshape MPS tensors
+        for site in range(L):
+            if site != 0 and site != L-1:
+                MPS_tensor[site] = MPS_tensor[site].reshape(r[site], D, r[site+1]) # shape should be (left_bond_dim, phys_dim, right_bond_dim)
+            # introduce dummy index at the edges
+            elif site == 0:
+                phys_dim, right_bond_dim = MPS_tensor[site].shape
+                MPS_tensor[site] = MPS_tensor[site].reshape(1, phys_dim, right_bond_dim)
+            else:
+                left_bond_dim, phys_dim = MPS_tensor[site].shape
+                MPS_tensor[site] = MPS_tensor[site].reshape(left_bond_dim, phys_dim, 1)
+
+        # print for debug purpose
+        for site in MPS_tensor.keys():
+            print("MPS site: {:}".format(site+1))
+            print("Reshaped MPS tensors: {:}".format(MPS_tensor[site].shape))
+            assert np.allclose(np.einsum('aib,cib->ac', MPS_tensor[site], MPS_tensor[site]), np.eye(MPS_tensor[site].shape[0]))
+        # store the decompose MPS tensor as an globally
+        self.MPS_tensor_right = MPS_tensor
 
         return
