@@ -24,7 +24,7 @@ def main():
     num_state = 3
 
     tensor = MPS_decompose(num_site, num_state)
-    # tensor.left_decompose()
+    tensor.left_decompose()
     tensor.right_decompose()
 
     return

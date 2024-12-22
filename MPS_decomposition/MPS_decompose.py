@@ -59,6 +59,53 @@ class MPS_decompose(object):
             norm += element**2
         return norm
 
+    def check_result(self, input_MPS):
+        """check if the decomposed MPS can restore the original tensor"""
+        # form a python dictionary form alphabet
+        alphabet = {}
+        lower_start = ord('a')
+        upper_start = ord('A')
+        for i in range(26):
+            alphabet[i] = chr(lower_start)
+            lower_start += 1
+        for i in range(26,52):
+            alphabet[i] = chr(upper_start)
+            upper_start += 1
+        if False:
+            # print for debug purpose
+            for label in alphabet.keys():
+                print("key for alphabet:{:}".format(label))
+                print("corresponding letter:{:}".format(alphabet[label]))
+
+        # initialize the input tensor with the same shape as the input tensor
+        output_string = ""
+        for site in range(self.L):
+            left_bond_dim, phys_dim, right_bond_dim = input_MPS[site].shape
+
+            if site != 0:
+                # consecutively add node in the tensor train
+                string = output_string
+                string += "x,xyz->"
+                string += output_string
+                string += "yz"
+                output_tensor = np.einsum(string, output_tensor, input_MPS[site]).copy()
+            else:
+                # elimate the dummy index
+                output_tensor = input_MPS[site].squeeze().copy()
+
+            # print(output_tensor.shape)
+            output_string += alphabet[site]
+
+        output_tensor = output_tensor.squeeze()
+
+        # print("shape of the restored tensor:{:}".format(output_tensor.shape))
+        # print("shape of the input tensor:{:}".format(self.input_tensor.shape))
+        # print(abs(self.input_tensor-output_tensor))
+        assert np.allclose(self.input_tensor, output_tensor)
+
+
+        return
+
 
     def left_decompose(self):
         """algorithm to decompose the tensor to MPS from the left"""
@@ -118,6 +165,9 @@ class MPS_decompose(object):
             assert np.allclose(np.einsum('iaj,iak->jk', MPS_tensor[site], MPS_tensor[site]), np.eye(MPS_tensor[site].shape[2]))
         # store the decompose MPS tensor as an globally
         self.MPS_tensor_left = MPS_tensor
+
+        # check the decomposed tensor
+        self.check_result(self.MPS_tensor_left)
 
         return
 
@@ -181,5 +231,8 @@ class MPS_decompose(object):
             assert np.allclose(np.einsum('aib,cib->ac', MPS_tensor[site], MPS_tensor[site]), np.eye(MPS_tensor[site].shape[0]))
         # store the decompose MPS tensor as an globally
         self.MPS_tensor_right = MPS_tensor
+
+        # check the decomposed tensor
+        self.check_result(self.MPS_tensor_right)
 
         return
