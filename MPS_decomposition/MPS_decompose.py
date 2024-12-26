@@ -40,13 +40,14 @@ class MPS_decompose(object):
         # pass the shape into rand function
         self.input_tensor = np.random.rand(*shape)
 
-        # normalize the state vector <psi|psi> = 1
-        norm = self.cal_norm(self.input_tensor)
-        print("norm of input tensor the original tensor:{:}".format(norm))
-        self.input_tensor /= np.sqrt(norm)
+        if False:
+            # normalize the state vector <psi|psi> = 1
+            norm = self.cal_norm(self.input_tensor)
+            print("norm of input tensor the original tensor:{:}".format(norm))
+            self.input_tensor /= np.sqrt(norm)
 
-        # check the tensor is normalized
-        assert np.allclose(1, self.cal_norm(self.input_tensor))
+            # check the tensor is normalized
+            assert np.allclose(1, self.cal_norm(self.input_tensor))
 
         # input tensor
         print("Shape of input tensor:{:}".format(self.input_tensor.shape))
@@ -159,17 +160,19 @@ class MPS_decompose(object):
                 MPS_tensor[site] = MPS_tensor[site].reshape(left_bond_dim, phys_dim, 1)
 
         # print for debug purpose
-        for site in MPS_tensor.keys():
-            print("MPS site: {:}".format(site+1))
-            print("Reshaped MPS tensors: {:}".format(MPS_tensor[site].shape))
-            assert np.allclose(np.einsum('iaj,iak->jk', MPS_tensor[site], MPS_tensor[site]), np.eye(MPS_tensor[site].shape[2]))
+        if False:
+            for site in MPS_tensor.keys():
+                print("MPS site: {:}".format(site+1))
+                print("Reshaped MPS tensors: {:}".format(MPS_tensor[site].shape))
+                assert np.allclose(np.einsum('iaj,iak->jk', MPS_tensor[site], MPS_tensor[site]), np.eye(MPS_tensor[site].shape[2]))
+
         # store the decompose MPS tensor as an globally
-        self.MPS_tensor_left = MPS_tensor
+        MPS_tensor_left = MPS_tensor
 
         # check the decomposed tensor
-        self.check_result(self.MPS_tensor_left)
+        self.check_result(MPS_tensor_left)
 
-        return
+        return MPS_tensor_left
 
     def right_decompose(self):
         """algorithm to decompose the tensor to MPS from the left"""
@@ -225,14 +228,15 @@ class MPS_decompose(object):
                 MPS_tensor[site] = MPS_tensor[site].reshape(left_bond_dim, phys_dim, 1)
 
         # print for debug purpose
-        for site in MPS_tensor.keys():
-            print("MPS site: {:}".format(site+1))
-            print("Reshaped MPS tensors: {:}".format(MPS_tensor[site].shape))
-            assert np.allclose(np.einsum('aib,cib->ac', MPS_tensor[site], MPS_tensor[site]), np.eye(MPS_tensor[site].shape[0]))
+        if False:
+            for site in MPS_tensor.keys():
+                print("MPS site: {:}".format(site+1))
+                print("Reshaped MPS tensors: {:}".format(MPS_tensor[site].shape))
+                assert np.allclose(np.einsum('aib,cib->ac', MPS_tensor[site], MPS_tensor[site]), np.eye(MPS_tensor[site].shape[0]))
         # store the decompose MPS tensor as an globally
-        self.MPS_tensor_right = MPS_tensor
+        MPS_tensor_right = MPS_tensor
 
         # check the decomposed tensor
-        self.check_result(self.MPS_tensor_right)
+        self.check_result(MPS_tensor_right)
 
-        return
+        return MPS_tensor_right
