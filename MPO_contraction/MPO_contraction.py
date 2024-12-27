@@ -51,22 +51,7 @@ class MPO_contraction(MPS_canonical):
         super(MPO_contraction, self).__init__(D_MPS, d_MPS, L)
         self.input_MPS = self.left_canonical()
 
-        # construct the initial MPS
-        for site in range(L):
-            # Determine dimensions of the current tensor
-            left_bond_dim = D_MPS if site > 0 else 1  # Left bond dimension is 1 for the first site
-            right_bond_dim = D_MPS if site < L - 1 else 1  # Right bond dimension is 1 for the last site
-
-            # Generate a random tensor of shape (left_bond_dim * phys_dim, right_bond_dim)
-            self.input_MPS[site] = np.random.randn(left_bond_dim, d_MPS, right_bond_dim)
-
-        # print input MPS for debug
-        for site in self.input_MPS.keys():
-            print("site:{:}".format(site+1))
-            print("MPS tensor shape:{:}".format(self.input_MPS[site].shape))
-            # print("MPS tensor:\n{:}".format(self.input_MPS[site]))
-
-        # construct the initial local operator O[1]O[2]...O[L]
+        # construct the initial MPO
         for site in range(L):
             left_bond_dim = D_MPO if site > 0 else 1  # Left bond dimension is 1 for the first site
             right_bond_dim = D_MPO if site < L - 1 else 1  # Right bond dimension is 1 for the last site
