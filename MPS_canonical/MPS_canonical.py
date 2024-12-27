@@ -71,7 +71,7 @@ class MPS_canonical(object):
 
             return output_tensor, S, Vh
 
-        if True:
+        if False:
             input_MPS = self.input_MPS
         else:
             pass
