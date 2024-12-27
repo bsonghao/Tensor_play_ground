@@ -24,7 +24,7 @@ sys.path.insert(0, project_dir)
 # local import
 from  MPS_canonical import MPS_canonical
 
-class MPO_contraction(object):
+class MPO_contraction(MPS_canonical):
     """
     The object implement the algorithms that efficiently applying an MPO to ab MPS
     """
@@ -44,9 +44,12 @@ class MPO_contraction(object):
         self.d_MPO = d_MPO
         self.L = L
 
-        # initial the input MPS and the local operator as python dictionary
-        self.input_MPS = {}
+        # initial the input MPO as python dictionary
         self.input_MPO = {}
+
+        # inherit instances from MPS_canonical class
+        super(MPO_contraction, self).__init__(D_MPS, d_MPS, L)
+        self.input_MPS = self.left_canonical()
 
         # construct the initial MPS
         for site in range(L):
@@ -56,11 +59,6 @@ class MPO_contraction(object):
 
             # Generate a random tensor of shape (left_bond_dim * phys_dim, right_bond_dim)
             self.input_MPS[site] = np.random.randn(left_bond_dim, d_MPS, right_bond_dim)
-
-        # left orthornormalize the input MPS
-        function = MPS_canonical(D_MPS, d_MPS, L)
-        self.input_MPS = function.left_canonical(self.input_MPS)
-
 
         # print input MPS for debug
         for site in self.input_MPS.keys():
