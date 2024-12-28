@@ -70,7 +70,7 @@ class MPS_compression(MPS_canonical):
             return output_tensor, U_truncate, S_truncate
 
         # loop over each site to perform the MPS compression
-        self.SVD_compressed_MPS = {}
+        SVD_compressed_MPS = {}
         for i in range(L):
             site = L-i-1
             # calcuate input tensor to perform SVD at each site
@@ -83,12 +83,12 @@ class MPS_compression(MPS_canonical):
             B_tilde, U_tilde, S_tilde = _local_compression(M, site)
 
             # store the compressed MPS at each site
-            self.SVD_compressed_MPS[site] = B_tilde
+            SVD_compressed_MPS[site] = B_tilde
 
         # print and check the compressed tensor for debuging purpose
         print("SVD compressed tensor:")
         for site in range(L):
-            tensor = self.SVD_compressed_MPS[site]
+            tensor = SVD_compressed_MPS[site]
             left_bond_dim, phys_dim, right_bond_dim = tensor.shape
             print("Site {:}:".format(site+1))
             print("shape:{:}".format(tensor.shape))
@@ -97,7 +97,7 @@ class MPS_compression(MPS_canonical):
             # print("tensor:\n{:}".format(self.right_canonical_MPS[site]))
 
 
-        return self.SVD_compressed_MPS
+        return SVD_compressed_MPS
 
     def iterative_compress(self):
         """implement method that compress a MPS from variational optimize the matrix parameterize on each site"""
@@ -179,7 +179,7 @@ class MPS_compression(MPS_canonical):
         initial_MPS = self.left_canonical(initial_MPS)
 
         local_decomposed_MPS = {}
-        self.iterative_decomposed_MPS = {}
+        iterative_decomposed_MPS = {}
 
         # loop over each site for local compression
         for i in range(L):
@@ -199,7 +199,7 @@ class MPS_compression(MPS_canonical):
                     for j in range(local_site-1):
                         local_decomposed_MPS[j] = initial_MPS[j]
                     local_decomposed_MPS[local_site-1] = input_tensor
-                self.iterative_decomposed_MPS[local_site] = _local_compression(local_decomposed_MPS, local_site)
+                iterative_decomposed_MPS[local_site] = _local_compression(local_decomposed_MPS, local_site)
 
             else:
                 local_decomposed_MPS[local_site] = B
@@ -208,7 +208,7 @@ class MPS_compression(MPS_canonical):
                     local_decomposed_MPS[j] = initial_MPS[j]
 
                 # variationally compress MPS at each local site
-                self.iterative_decomposed_MPS[local_site] = _local_compression(local_decomposed_MPS, local_site-1)
+                iterative_decomposed_MPS[local_site] = _local_compression(local_decomposed_MPS, local_site-1)
 
         if True:
             # print for debug purpose
@@ -223,10 +223,10 @@ class MPS_compression(MPS_canonical):
                 print("shape of the tensor:{:}".format(self.left_canonical_MPS[site].shape))
 
             print("Compressed tensor:")
-            for site in self.iterative_decomposed_MPS.keys():
+            for site in iterative_decomposed_MPS.keys():
                 print("site: {:}".format(site+1))
-                print("shape of the tensor:{:}".format(self.iterative_decomposed_MPS[site].shape))
+                print("shape of the tensor:{:}".format(iterative_decomposed_MPS[site].shape))
 
         print("***Tensor compression procedure terminate")
 
-        return
+        return iterative_decomposed_MPS

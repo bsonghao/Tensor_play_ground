@@ -11,23 +11,24 @@ import pstats
 import numpy as np
 
 # import the path to the package
-project_dir = abspath(join(dirname(__file__), '/Users/pauliebao/Tensor_play_ground/MPS_compression/'))
+project_dir = abspath(join(dirname(__file__), '/Users/pauliebao/Tensor_play_ground/MPO_compression/'))
 sys.path.insert(0, project_dir)
 
 # local import
-from MPS_compression import MPS_compression
+from MPO_compression import MPO_compression
 
 def main():
     """main function for MPS decomposition algorithm"""
     # input tensor shape
     bond_dimension = 6
     truncated_bond_dimension = 2
-    num_state = 4
-    num_site = 10
+    incoming_phys_dim = 3
+    outcoming_phys_dim = 4
+    num_site = 5
 
-    tensor = MPS_compression(bond_dimension, num_state, num_site, truncated_bond_dimension)
-    tensor.SVD_compress()
-    tensor.iterative_compress()
+    arges = (bond_dimension, incoming_phys_dim, outcoming_phys_dim, num_site, truncated_bond_dimension)
+    tensor = MPO_compression(*arges)
+    tensor.MPO_iterative_compression()
 
     return
 
