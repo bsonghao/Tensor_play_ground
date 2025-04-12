@@ -20,9 +20,9 @@ from MPS_canonical import MPS_canonical
 def main():
     """main function for MPS decomposition algorithm"""
     # input tensor shape
-    bond_dimension = 6
-    num_state = 4
-    num_site = 5
+    bond_dimension = 5
+    num_state = 2
+    num_site = 10
 
     tensor = MPS_canonical(bond_dimension, num_state, num_site)
     tensor.left_canonical()
