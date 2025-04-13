@@ -61,8 +61,8 @@ class spin_Hamiltonian(object):
                 self.H[site][2,:,:,0] += self.S_minus
                 self.H[site][3,:,:,0] += self.S_z
                 self.H[site][4,:,:,0] -= self.h * self.S_z
-                self.H[site][4,:,:,1] += self.J/2 * self.S_z
-                self.H[site][4,:,:,2] += self.J/2 * self.S_plus
+                self.H[site][4,:,:,1] -= self.J/2 * self.S_minus
+                self.H[site][4,:,:,2] -= self.J/2 * self.S_plus
                 self.H[site][4,:,:,3] += self.Jz * self.S_z
                 self.H[site][4,:,:,4] += np.eye(phys_dim, dtype=complex)
 
@@ -75,8 +75,8 @@ class spin_Hamiltonian(object):
 
             else:
                 self.H[site][0,:,:,0] -= self.h * self.S_z
-                self.H[site][0,:,:,1] += self.J/2 * self.S_z
-                self.H[site][0,:,:,2] += self.J/2 * self.S_plus
+                self.H[site][0,:,:,1] -= self.J/2 * self.S_minus
+                self.H[site][0,:,:,2] -= self.J/2 * self.S_plus
                 self.H[site][0,:,:,3] += self.Jz * self.S_z
                 self.H[site][0,:,:,4] += np.eye(phys_dim, dtype=complex)
 
@@ -157,6 +157,51 @@ class spin_Hamiltonian(object):
                 # print("tensor:\n{:}".format(right_canonical_MPS[site]))
         return right_canonical_MPS
 
+    def _left_canonical(self, input_MPS, D):
+        """procedure to bring the MPS into left canonical form"""
+        def _local_canonical(input_tensor):
+            """produce left-canonical matrix at each site"""
+            left_bond_dim, phys_dim, right_bond_dim = input_tensor.shape
+            # reshape the input tensor into the shape (left_bond_dim * phys_dim, right_bond_dim)
+            input_tensor = input_tensor.reshape(left_bond_dim*phys_dim, right_bond_dim)
+            # SVD the reshaped tensor
+            A, S, Vh = np.linalg.svd(input_tensor, full_matrices=False)
+            # reshape the decomposed tensor in to the original shape
+            # change right bond dimension for base cases
+            right_bond_dim = min(left_bond_dim*phys_dim, right_bond_dim)
+
+            output_tensor = A.reshape(left_bond_dim, phys_dim, right_bond_dim)
+
+            return output_tensor, S, Vh
+
+        d, L = 2, self.L
+        left_canonical_MPS = {}
+        # loop over each site of the MPS to form left-canonical MPS
+        for site in range(L):
+            # base case
+            if site == 0:
+                input_tensor = input_MPS[site]
+            else:
+                input_tensor = np.einsum('s,sa,aib->sib', S, V, input_MPS[site])
+
+            A, S, V = _local_canonical(input_tensor)
+
+            # site the decomponsed tensor at each site
+            left_canonical_MPS[site] = A
+
+        # check if the procedure produce the lelf-canonical MPS
+        if True:
+            print("Left canonical MPS:")
+            for site in range(L):
+                tensor =left_canonical_MPS[site]
+                left_bond_dim, phys_dim, right_bond_dim = tensor.shape
+                assert np.allclose(np.einsum('bia,bic->ac', tensor, tensor), np.eye(right_bond_dim))
+                print("Site {:}:".format(site+1))
+                print("shape:{:}".format(left_canonical_MPS[site].shape))
+                # print("tensor:\n{:}".format(self.left_canonical_MPS[site]))
+
+        return left_canonical_MPS
+
     def _cal_eff_H(self, input_MPS, site, D=5):
         """calculate effective rank-4 local Hamiltonian"""
         L = self.L
@@ -199,13 +244,13 @@ class spin_Hamiltonian(object):
 
             dim = left_tensor.shape[0]*self.H[site].shape[1]*right_tensor.shape[0]
 
-            H_eff = np.einsum('ijk,jabm,lmn->kanibl', left_tensor, self.H[site], right_tensor).reshape(dim, dim)
+            H_eff = np.einsum('ijk,jabm,lmn->ialkbn', left_tensor, self.H[site], right_tensor).reshape(dim, dim)
 
         # deal with edge cases
         elif site == 0:
             right_tensor = _cal_right_tensor(site+1)
             dim = self.H[site].shape[1] * right_tensor.shape[0]
-            H_eff = np.einsum('abl,mlk->ambk', np.squeeze(self.H[site]), right_tensor).reshape(dim, dim)
+            H_eff = np.einsum('abm,lmn->albn', np.squeeze(self.H[site]), right_tensor).reshape(dim, dim)
             # print(H_eff.shape)
             # print(self.H[site].shape)
             # print(right_tensor.shape)
@@ -214,7 +259,7 @@ class spin_Hamiltonian(object):
         else:
             left_tensor = _cal_left_tensor(site)
             dim = self.H[site].shape[1] * left_tensor.shape[0]
-            H_eff = np.einsum('lab,mlk->ambk', np.squeeze(self.H[site]), left_tensor).reshape(dim, dim)
+            H_eff = np.einsum('mab,lmn->albn', np.squeeze(self.H[site]), left_tensor).reshape(dim, dim)
 
         return H_eff
 
@@ -223,7 +268,8 @@ class spin_Hamiltonian(object):
         L = self.L
         # Step 1: initialize a random MPS
         trial_MPS = self._initialize_mps(D)
-        # Step 2: bring the initial MPS into a right canonical form
+        # Step 2: bring the initial MPS into a right normalize form
+        # trial_MPS = self._left_canonical(trial_MPS, D)
         trial_MPS = self._right_canonical(trial_MPS, D)
         # for i in range(L):
             # print(f"intial MPS {i+1} shape {trial_MPS[i].shape}")
@@ -248,12 +294,13 @@ class spin_Hamiltonian(object):
 
                 # step 3: calcuate effection rank-6 effection Hamiltonian on each site
                 H_eff = self._cal_eff_H(trial_MPS, site)
-                print(f'H_eff:\n{H_eff}')
+                # print(f'H_eff:\n{H_eff}')
                 assert np.allclose(H_eff, H_eff.transpose().conj())
+
                 # step 4: diagonalize the Hamiltonian
-                E, V = np.linalg.eig(H_eff)
+                E, V = np.linalg.eigh(H_eff)
                 # sort eigenvalue and eigenvectors
-                idx = E.real.argsort()
+                idx = E.argsort()
                 E = E[idx]
                 V = V[:,idx]
 
@@ -274,7 +321,7 @@ class spin_Hamiltonian(object):
                         # print(S.shape)
                         # print(V.shape)
                         # print(trial_MPS[site+1].shape)
-                        trial_MPS[site+1] = np.einsum('s,sa,aib->sib', S, Vh, trial_MPS[site+1])
+                        trial_MPS[site+1] = np.einsum('s,sa,aib->sib', S, Vh, trial_MPS[site+1]).copy()
                     else:
                         pass
 
@@ -285,7 +332,7 @@ class spin_Hamiltonian(object):
                     left_bond_dim = min(phys_dim*right_bond_dim, left_bond_dim)
                     trial_MPS[site] = B.reshape(left_bond_dim, phys_dim, right_bond_dim)
                     if site > 0:
-                        trial_MPS[site-1] = np.einsum('aib,bs,s->ais', trial_MPS[site-1], U, S)
+                        trial_MPS[site-1] = np.einsum('aib,bs,s->ais', trial_MPS[site-1], U, S).copy()
                     else:
                         pass
 
@@ -295,7 +342,7 @@ class spin_Hamiltonian(object):
                 # store the data
                 energy_dic["sweep"].append(iteration+1)
                 energy_dic["iteration"].append(L*iteration+i)
-                energy_dic['energy'].append(E[0].real)
+                energy_dic['energy'].append(E[0])
 
         df = pd.DataFrame(energy_dic)
         df.to_csv("spin_Hamiltonain_DMRG_GS_search_data.csv", index=False)
