@@ -100,9 +100,10 @@ class spin_Hamiltonian(object):
             initial_MPS[site] = tensor
 
         # print input MPS for debug
-        # for site in initial_MPS.keys():
-            # print("site:{:}".format(site+1))
-            # print("Initial MPS matrix shape:{:}".format(initial_MPS[site].shape))
+
+        for site in initial_MPS.keys():
+            print("site:{:}".format(site+1))
+            print("Initial MPS matrix shape:{:}".format(initial_MPS[site].shape))
             # print("MPS matrix:\n{:}".format(self.input_MPS[site]))
 
         return initial_MPS
@@ -129,95 +130,32 @@ class spin_Hamiltonian(object):
         right_canonical_MPS = {}
         # loop over each site of the MPS to form left-canonical MPS
         for i in range(L):
-            site = L-i-1
+            site_i = L-i-1
             # base case
-            if site == L-1:
-                input_tensor = input_MPS[site]
+            if site_i == L-1:
+                input_tensor = input_MPS[site_i]
             else:
-                input_tensor = np.einsum('aib,bs,s->ais', input_MPS[site], U, S)
+                input_tensor = np.einsum('aib,bs,s->ais', input_MPS[site_i], U, S)
 
-            # if site != 0:
+            # if site_i != 0:
             B, S, U = _local_canonical(input_tensor)
-            # site the decomponsed tensor at each site
-            right_canonical_MPS[site] = B
+            right_canonical_MPS[site_i] = B.copy()
+
             # else:
-                # right_canonical_MPS[site] = input_tensor
+                # right_canonical_MPS[site_i] = input_tensor.copy()
 
         # check if the procedure produce the lelf-canonical MPS
-        if False:
-            print("Right canonical MPS:")
+        if True:
+            # print("Right canonical MPS:")
             for site in range(L):
-                tensor = right_canonical_MPS[site]
+                tensor = right_canonical_MPS[site].copy()
                 left_bond_dim, phys_dim, right_bond_dim = tensor.shape
                 # if site != 0:
                 assert np.allclose(np.einsum('aib,cib->ac', tensor, tensor), np.eye(left_bond_dim))
-                print("Site {:}:".format(site+1))
-                print("shape:{:}".format(right_canonical_MPS[site].shape))
-                print("tensor:\n{:}".format(right_canonical_MPS[site]))
+                # print("Site {:}:".format(site+1))
+                # print("shape:{:}".format(right_canonical_MPS[site].shape))
+                # print("tensor:\n{:}".format(right_canonical_MPS[site]))
         return right_canonical_MPS
-
-    def _mix_canonical(self, input_MPS, site, D):
-        """bring a input MPS into a mixed canonical form"""
-        L=self.L
-        def _local_SVD(input_tensor):
-            """produce left-canonical matrix at each site"""
-            left_bond_dim, phys_dim, right_bond_dim = input_tensor.shape
-            # reshape the input tensor into the shape (left_bond_dim * phys_dim, right_bond_dim)
-            input_tensor = input_tensor.reshape(left_bond_dim*phys_dim, right_bond_dim)
-            # SVD the reshaped tensor
-            A, S, Vh = np.linalg.svd(input_tensor, full_matrices=False)
-            right_bond_dim = min(left_bond_dim*phys_dim, right_bond_dim)
-            # left_bond_dim = min(S.shape[0], left_bond_dim)
-
-            # left_bond_dim = min(S.shape[0], left_bond_dim)
-            output_tensor = A.reshape((left_bond_dim, phys_dim, right_bond_dim))
-
-            return output_tensor, S, Vh
-
-        # bring the input MPS into left canonical form
-        right_canonical_MPS = self._right_canonical(input_MPS, D)
-        os._exit(0)
-        # loop over each site to perform the MPS compression
-        output_MPS = {}
-        for i in range(site):
-            site_i = i
-            if site_i == 0: # base case
-                M = right_canonical_MPS[site_i].copy()
-            else:
-                M = np.einsum('s,sa,aib->sib', S, Vh, input_MPS[site]).copy()
-            # perform SVD at each site
-            A, S, Vh = _local_SVD(M)
-
-            # store the compressed MPS at each site
-            # if site_i != site:
-            output_MPS[site_i] = A
-            # else: # for edge case
-                # output_MPS[site_i] = M
-
-        for i in range(site+1, L):
-            site_i = i
-            output_MPS[site_i] =  right_canonical_MPS[site_i]
-
-        # keep the output MPS at the give site invariant of the input
-        output_MPS[site] = right_canonical_MPS[site]
-
-        # print and check the compressed tensor for debuging purpose
-        # print("mixed canonical tensor centered at site {:}:".format(site+1))
-        if True:
-            for site_i in range(L):
-                tensor = output_MPS[site_i]
-                left_bond_dim, phys_dim, right_bond_dim = tensor.shape
-                # print("Site {:}:".format(site_i+1))
-                # print("shape:{:}".format(tensor.shape))
-                if site_i > site: # check if all the tensor are right canonical on the right of the site
-                    assert np.allclose(np.einsum('aib,cib->ac', tensor, tensor), np.eye(left_bond_dim))
-                elif site_i < site: # check if all the tensor are left canonical on the right of the site
-                    assert np.allclose(np.einsum('bia,bic->ac', tensor, tensor), np.eye(right_bond_dim))
-                else:
-                    pass
-
-        return output_MPS
-
 
     def _cal_eff_H(self, input_MPS, site, D=5):
         """calculate effective rank-4 local Hamiltonian"""
@@ -285,9 +223,11 @@ class spin_Hamiltonian(object):
         L = self.L
         # Step 1: initialize a random MPS
         trial_MPS = self._initialize_mps(D)
-
-        # trial_MPS = self._right_canonical(trial_MPS, D)
-
+        # Step 2: bring the initial MPS into a right canonical form
+        trial_MPS = self._right_canonical(trial_MPS, D)
+        # for i in range(L):
+            # print(f"intial MPS {i+1} shape {trial_MPS[i].shape}")
+        # os._exit(0)
         # define a python dictionary store energy data
         energy_dic = {
         "sweep":[],
@@ -297,21 +237,21 @@ class spin_Hamiltonian(object):
 
         # loop over each site
         for iteration in range(num_sweep):
+
             for i in range(L):
                 if iteration%2 == 0:
                     site = i # sweep from left to right
+                    right_sweep = True
                 else:
                     site = self.L - i - 1 # sweep from right to left
-
-                # step 2: bring the trial into a mix canonical form
-                trial_MPS = self._mix_canonical(trial_MPS, site, D)
+                    right_sweep = False
 
                 # step 3: calcuate effection rank-6 effection Hamiltonian on each site
                 H_eff = self._cal_eff_H(trial_MPS, site)
-                # print(f'H_eff:\n{H_eff}')
-                # assert np.allclose(H_eff, H_eff.transpose().conj())
+                print(f'H_eff:\n{H_eff}')
+                assert np.allclose(H_eff, H_eff.transpose().conj())
                 # step 4: diagonalize the Hamiltonian
-                E, V = np.linalg.eigh(H_eff)
+                E, V = np.linalg.eig(H_eff)
                 # sort eigenvalue and eigenvectors
                 idx = E.real.argsort()
                 E = E[idx]
@@ -319,9 +259,36 @@ class spin_Hamiltonian(object):
 
                 # step 5: update the local MPS
                 left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site].shape
-                trial_MPS[site] = V[:,0].reshape(left_bond_dim, phys_dim, right_bond_dim)
+                optimized_tensor = V[:,0].reshape(left_bond_dim, phys_dim, right_bond_dim)
 
-                # step 6: bring the updated MPS into the the mixed canonical form centered at the site + 1
+                # left normalize the optimized tensor if right sweep
+                if right_sweep:
+                    optimized_tensor = optimized_tensor.reshape(left_bond_dim*phys_dim, right_bond_dim)
+                    A, S, Vh = np.linalg.svd(optimized_tensor, full_matrices=False)
+                    # change right bond dimension for base cases
+                    right_bond_dim = min(left_bond_dim*phys_dim, right_bond_dim)
+
+                    trial_MPS[site] = A.reshape(left_bond_dim, phys_dim, right_bond_dim)
+                    if site < L-1:
+                        # print(f'site:{site+1}')
+                        # print(S.shape)
+                        # print(V.shape)
+                        # print(trial_MPS[site+1].shape)
+                        trial_MPS[site+1] = np.einsum('s,sa,aib->sib', S, Vh, trial_MPS[site+1])
+                    else:
+                        pass
+
+                # right normalize the optimized tensor if left sweep
+                else:
+                    optimized_tensor=optimized_tensor.reshape(left_bond_dim, right_bond_dim*phys_dim)
+                    U, S, B = np.linalg.svd(optimized_tensor, full_matrices=False)
+                    left_bond_dim = min(phys_dim*right_bond_dim, left_bond_dim)
+                    trial_MPS[site] = B.reshape(left_bond_dim, phys_dim, right_bond_dim)
+                    if site > 0:
+                        trial_MPS[site-1] = np.einsum('aib,bs,s->ais', trial_MPS[site-1], U, S)
+                    else:
+                        pass
+
 
                 print(f"Sweep {iteration}, site {site}: energy {E[0]}")
 
