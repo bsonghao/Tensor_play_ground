@@ -118,7 +118,7 @@ class spin_Hamiltonian(object):
             U, S, B = np.linalg.svd(input_tensor, full_matrices=False)
             # reshape the decomposed tensor in to the original shape
             # change left bond dimension for base cases
-            left_bond_dim = min(S.shape[0], left_bond_dim)
+            left_bond_dim = min(right_bond_dim*phys_dim, left_bond_dim)
 
             output_tensor = B.reshape(left_bond_dim, phys_dim, right_bond_dim)
 
@@ -166,7 +166,7 @@ class spin_Hamiltonian(object):
             input_tensor = input_tensor.reshape(left_bond_dim*phys_dim, right_bond_dim)
             # SVD the reshaped tensor
             A, S, Vh = np.linalg.svd(input_tensor, full_matrices=False)
-            right_bond_dim = min(S.shape[0], right_bond_dim)
+            right_bond_dim = min(left_bond_dim*phys_dim, right_bond_dim)
             # left_bond_dim = min(S.shape[0], left_bond_dim)
 
             # left_bond_dim = min(S.shape[0], left_bond_dim)
@@ -176,6 +176,7 @@ class spin_Hamiltonian(object):
 
         # bring the input MPS into left canonical form
         right_canonical_MPS = self._right_canonical(input_MPS, D)
+        os._exit(0)
         # loop over each site to perform the MPS compression
         output_MPS = {}
         for i in range(site):
@@ -285,6 +286,7 @@ class spin_Hamiltonian(object):
         # Step 1: initialize a random MPS
         trial_MPS = self._initialize_mps(D)
 
+        # trial_MPS = self._right_canonical(trial_MPS, D)
 
         # define a python dictionary store energy data
         energy_dic = {

@@ -63,10 +63,8 @@ class MPS_canonical(object):
             A, S, Vh = np.linalg.svd(input_tensor, full_matrices=False)
             # reshape the decomposed tensor in to the original shape
             # change right bond dimension for base cases
-            if left_bond_dim == 1:
-                right_bond_dim = min(phys_dim, right_bond_dim)
-            else:
-                pass
+            right_bond_dim = min(left_bond_dim*phys_dim, right_bond_dim)
+
             output_tensor = A.reshape(left_bond_dim, phys_dim, right_bond_dim)
 
             return output_tensor, S, Vh
@@ -114,10 +112,9 @@ class MPS_canonical(object):
             U, S, B = np.linalg.svd(input_tensor, full_matrices=False)
             # reshape the decomposed tensor in to the original shape
             # change left bond dimension for base cases
-            if right_bond_dim == 1:
-                left_bond_dim = min(phys_dim, left_bond_dim)
-            else:
-                pass
+
+            left_bond_dim = min(phys_dim*right_bond_dim, left_bond_dim)
+
             output_tensor = B.reshape(left_bond_dim, phys_dim, right_bond_dim)
 
             return output_tensor, S, U
