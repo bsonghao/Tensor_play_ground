@@ -128,7 +128,7 @@ class spin_Hamiltonian(object):
 
         d, L = 2, self.L
         right_canonical_MPS = {}
-        # loop over each site of the MPS to form left-canonical MPS
+        # loop over each site of the MPS to form right-canonical MPS
         for i in range(L):
             site_i = L-i-1
             # base case
@@ -201,6 +201,75 @@ class spin_Hamiltonian(object):
                 # print("tensor:\n{:}".format(self.left_canonical_MPS[site]))
 
         return left_canonical_MPS
+
+
+    def _cal_expectation(self, input_MPS, input_MPO):
+        """calcuate expectation value site by site"""
+        L = self.L
+        def _contract(input_tensor, site):
+            """procedure the make contraction at each site to evaluate the expectation value of a local operator"""
+            output_tensor = np.einsum('ijk,ial,jabm,kbn->lmn',input_tensor, input_MPS[site], input_MPO[site], input_MPS[site])
+            return output_tensor
+
+        expectation_value = 0
+        for site in range(L):
+            if site == 0:
+                # handle base case
+                expectation_value = np.einsum('ial,jabm,kbn->ijklmn', input_MPS[site], input_MPO[site], input_MPS[site]).squeeze()
+            else:
+                expectation_value = _contract(expectation_value, site).copy()
+        # reduce the dummy index
+        expectation_value = np.squeeze(expectation_value)
+        if False:  # print for debug
+            print("expectation value:\n{:}".format(expectation_value))
+        return expectation_value
+
+
+    def _cal_MPO_MPO_product(self, MPO_1, MPO_2):
+        """calcuate the product between the two input MPOs site by site"""
+        d, L = 2, self.L
+        def _contract(input_MPO_1, input_MPO_2):
+           """procedure the make contraction at each site to evaluate the product two a MPOs"""
+           output_tensor = np.einsum('iabj,kbcl->ikacjl', input_MPO_1, input_MPO_2).copy()
+           return output_tensor
+
+        output_MPO = {}
+        for site in range(L):
+            local_output_MPS = _contract(MPO_1[site], MPO_2[site])
+
+            # shrink the bond dimension of the new output mps
+            left_bond_dim_MPO_1, right_bond_dim_MPO_1 = MPO_1[site].shape[0], MPO_1[site].shape[3]
+            left_bond_dim_MPO_2, right_bond_dim_MPO_2 = MPO_2[site].shape[0], MPO_2[site].shape[3]
+            new_shape = (left_bond_dim_MPO_1*left_bond_dim_MPO_2, d, d, right_bond_dim_MPO_1*right_bond_dim_MPO_2)
+            local_output_MPS = local_output_MPS.reshape(*new_shape)
+
+            # store the new MPS
+            output_MPO[site] = local_output_MPS
+
+
+        # print for debug purpose
+        if False: # print for debug
+            for site in output_MPO.keys():
+                print("site:{:}".format(site+1))
+                print("output MPS shape:{:}".format(output_MPO[site].shape))
+
+        return output_MPO
+
+    def _cal_variance(self, input_MPO, input_MPS):
+        """calcuate the variance (<O^2> - <O>^2) of the input MPO w.r.t the input MPS """
+        # calcuate H^2
+        H_square = self._cal_MPO_MPO_product(self.H, self.H)
+
+        # calcuate <H^2>
+        H_square_avg = self._cal_expectation(input_MPS, H_square)
+
+        # calcuate <H>
+        H_avg = self._cal_expectation(input_MPS, self.H)
+
+        # calculate variance
+        H_var = H_square_avg - H_avg**2
+
+        return H_var
 
     def _cal_eff_H(self, input_MPS, site, D=5):
         """calculate effective rank-4 local Hamiltonian"""
@@ -279,11 +348,11 @@ class spin_Hamiltonian(object):
         "sweep":[],
         "iteration":[],
         "energy":[],
+        "energy variance": []
          }
 
-        # loop over each site
+        # loop over each site and sweep back and force
         for iteration in range(num_sweep):
-
             for i in range(L):
                 if iteration%2 == 0:
                     site = i # sweep from left to right
@@ -336,13 +405,16 @@ class spin_Hamiltonian(object):
                     else:
                         pass
 
+                # Step 6: calcuate energy variance w.r.t the trial MPS
+                variance = self._cal_variance(self.H, trial_MPS)
 
-                print(f"Sweep {iteration}, site {site}: energy {E[0]}")
+                print(f"Sweep {iteration}, site {site}: energy {E[0]}, variance: {variance.real}")
 
                 # store the data
                 energy_dic["sweep"].append(iteration+1)
                 energy_dic["iteration"].append(L*iteration+i)
                 energy_dic['energy'].append(E[0])
+                energy_dic['energy variance'].append(variance.real)
 
         df = pd.DataFrame(energy_dic)
         df.to_csv("spin_Hamiltonain_DMRG_GS_search_data.csv", index=False)

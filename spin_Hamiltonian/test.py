@@ -27,7 +27,7 @@ def main():
 
 
     tensor = spin_Hamiltonian(L, J, Jz, h)
-    tensor.ground_state_search(num_sweep=10, D=2)
+    tensor.ground_state_search(num_sweep=10, D=8)
 
 
     return
