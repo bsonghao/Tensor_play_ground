@@ -30,12 +30,12 @@ class spin_Hamiltonian(object):
         self.h = h
 
         # define Pauli matrices
-        self.S_x = np.array([[0, 1], [1, 0]], dtype=complex)*0.5 # set h_bar = 1
-        self.S_y = np.array([[0, -1j], [1j, 0]], dtype=complex)*0.5 # set h_bar = 1
-        self.S_z = np.array([[1, 0], [0, -1]], dtype=complex)*0.5 # set h_bar = 1
+        self.S_x = np.array([[0, 1], [1, 0]], dtype=complex)* 0.5 # set hbar =1
+        self.S_y = np.array([[0, -1j], [1j, 0]], dtype=complex) * 0.5 # set hbar =1
+        self.S_z = np.array([[1, 0], [0, -1]], dtype=complex) * 0.5 # set hbar =1
 
-        self.S_plus = 0.5 * (self.S_x + 1j*self.S_y)
-        self.S_minus = 0.5 * (self.S_x - 1j*self.S_y)
+        self.S_plus = (self.S_x.copy() + 1j*self.S_y.copy())
+        self.S_minus = (self.S_x.copy() - 1j*self.S_y.copy())
 
         print("Pauli matrices:")
         print(f'sigma x:\n{self.S_x}')

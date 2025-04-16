@@ -20,14 +20,14 @@ from spin_Hamiltonian import spin_Hamiltonian
 def main():
     """main function for MPS decomposition algorithm"""
     # input tensor shape
-    L = 10
-    J = 2.
-    h = 1.
-    Jz = 1.
+    L = 20
+    J = 1.
+    h = 0.
+    Jz = 0.
 
 
     tensor = spin_Hamiltonian(L, J, Jz, h)
-    tensor.ground_state_search(num_sweep=10, D=8)
+    tensor.ground_state_search(num_sweep=2, D=14)
 
 
     return
