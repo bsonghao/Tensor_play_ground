@@ -20,7 +20,7 @@ from spin_Hamiltonian import spin_Hamiltonian
 def main():
     """main function for MPS decomposition algorithm"""
     # input tensor shape
-    L = 20
+    L = 10
     J = 1.
     h = 0.
     Jz = 0.

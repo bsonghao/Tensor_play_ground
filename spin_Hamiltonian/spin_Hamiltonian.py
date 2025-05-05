@@ -307,10 +307,6 @@ class spin_Hamiltonian(object):
             left_tensor = _cal_left_tensor(site)
             right_tensor = _cal_right_tensor(site+1)
 
-            # print(left_tensor.shape)
-            # print(self.H[site].shape)
-            # print(right_tensor.shape)
-
             dim = left_tensor.shape[0]*self.H[site].shape[1]*right_tensor.shape[0]
 
             H_eff = np.einsum('ijk,jabm,lmn->ialkbn', left_tensor, self.H[site], right_tensor).reshape(dim, dim)
@@ -320,11 +316,7 @@ class spin_Hamiltonian(object):
             right_tensor = _cal_right_tensor(site+1)
             dim = self.H[site].shape[1] * right_tensor.shape[0]
             H_eff = np.einsum('abm,lmn->albn', np.squeeze(self.H[site]), right_tensor).reshape(dim, dim)
-            # print(H_eff.shape)
-            # print(self.H[site].shape)
-            # print(right_tensor.shape)
-            # print(dim)
-            # os._exit(0)
+
         else:
             left_tensor = _cal_left_tensor(site)
             dim = self.H[site].shape[1] * left_tensor.shape[0]
@@ -342,7 +334,6 @@ class spin_Hamiltonian(object):
         trial_MPS = self._right_canonical(trial_MPS, D)
         # for i in range(L):
             # print(f"intial MPS {i+1} shape {trial_MPS[i].shape}")
-        # os._exit(0)
         # define a python dictionary store energy data
         energy_dic = {
         "sweep":[],
@@ -361,21 +352,26 @@ class spin_Hamiltonian(object):
                     site = self.L - i - 1 # sweep from right to left
                     right_sweep = False
 
-                # step 3: calcuate effection rank-6 effection Hamiltonian on each site
-                H_eff = self._cal_eff_H(trial_MPS, site)
-                # print(f'H_eff:\n{H_eff}')
-                assert np.allclose(H_eff, H_eff.transpose().conj())
+                # skip the first site to avoid repeating optimization of the same site
+                if iteration == 0 or (i!=0 and iteration != 0):
 
-                # step 4: diagonalize the Hamiltonian
-                E, V = np.linalg.eigh(H_eff)
-                # sort eigenvalue and eigenvectors
-                idx = E.argsort()
-                E = E[idx]
-                V = V[:,idx]
+                    # step 3: calcuate effection rank-6 effection Hamiltonian on each site
+                    H_eff = self._cal_eff_H(trial_MPS, site)
+                    # print(f'H_eff:\n{H_eff}')
+                    assert np.allclose(H_eff, H_eff.transpose().conj())
 
-                # step 5: update the local MPS
-                left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site].shape
-                optimized_tensor = V[:,0].reshape(left_bond_dim, phys_dim, right_bond_dim)
+                    # step 4: diagonalize the Hamiltonian
+                    E, V = np.linalg.eigh(H_eff)
+                    # sort eigenvalue and eigenvectors
+                    idx = E.argsort()
+                    E = E[idx]
+                    V = V[:,idx]
+
+                    # step 5: update the local MPS
+                    left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site].shape
+                    optimized_tensor = V[:,0].reshape(left_bond_dim, phys_dim, right_bond_dim)
+                else:
+                    optimized_tensor = trial_MPS[site]
 
                 # left normalize the optimized tensor if right sweep
                 if right_sweep:
@@ -415,6 +411,7 @@ class spin_Hamiltonian(object):
                 energy_dic["iteration"].append(L*iteration+i)
                 energy_dic['energy'].append(E[0])
                 energy_dic['energy variance'].append(variance.real)
+
 
         df = pd.DataFrame(energy_dic)
         df.to_csv("spin_Hamiltonain_DMRG_GS_search_data.csv", index=False)
