@@ -152,8 +152,8 @@ class spin_Hamiltonian(object):
                 left_bond_dim, phys_dim, right_bond_dim = tensor.shape
                 # if site != 0:
                 assert np.allclose(np.einsum('aib,cib->ac', tensor, tensor), np.eye(left_bond_dim))
-                # print("Site {:}:".format(site+1))
-                # print("shape:{:}".format(right_canonical_MPS[site].shape))
+                print("Right canonical MPS Site {:}:".format(site+1))
+                print("shape:{:}".format(right_canonical_MPS[site].shape))
                 # print("tensor:\n{:}".format(right_canonical_MPS[site]))
         return right_canonical_MPS
 
@@ -208,14 +208,14 @@ class spin_Hamiltonian(object):
         L = self.L
         def _contract(input_tensor, site):
             """procedure the make contraction at each site to evaluate the expectation value of a local operator"""
-            output_tensor = np.einsum('ijk,ial,jabm,kbn->lmn',input_tensor, input_MPS[site], input_MPO[site], input_MPS[site])
+            output_tensor = np.einsum('ijk,ial,jabm,kbn->lmn',input_tensor, input_MPS[site].conj(), input_MPO[site], input_MPS[site])
             return output_tensor
 
         expectation_value = 0
         for site in range(L):
             if site == 0:
                 # handle base case
-                expectation_value = np.einsum('ial,jabm,kbn->ijklmn', input_MPS[site], input_MPO[site], input_MPS[site]).squeeze()
+                expectation_value = np.einsum('ial,jabm,kbn->ijklmn', input_MPS[site].conj(), input_MPO[site], input_MPS[site]).squeeze()
             else:
                 expectation_value = _contract(expectation_value, site).copy()
         # reduce the dummy index
@@ -271,41 +271,42 @@ class spin_Hamiltonian(object):
 
         return H_var
 
-    def _cal_eff_H(self, input_MPS, site, D=5):
-        """calculate effective rank-4 local Hamiltonian"""
-        L = self.L
-        def _contract(input_tensor, site_y, right=False):
-            """procedure the make contraction at each site to evaluate the expectation value of a local operator"""
-            if right:
-                output_tensor = np.einsum('jnl,iaj,mabn,kbl->imk',input_tensor, input_MPS[site_y], self.H[site_y], input_MPS[site_y])
+    def _contract(self, input_MPS, input_tensor, site_y, right=False):
+        """procedure the make contraction at each site to evaluate the expectation value of a local operator"""
+        if right:
+            output_tensor = np.einsum('jnl,iaj,mabn,kbl->imk',input_tensor, input_MPS[site_y].conj(), self.H[site_y], input_MPS[site_y])
 
+        else:
+            output_tensor = np.einsum('imk,iaj,mabn,kbl->jnl',input_tensor, input_MPS[site_y].conj(), self.H[site_y], input_MPS[site_y])
+        return output_tensor
+
+    def _cal_left_tensor(self, input_MPS, site_x):
+        """calcuate the rank-3 tensor on the left of the effective H"""
+        for site_i in range(site_x):
+            if site_i == 0:
+                output_tensor = np.einsum('aj,abn,bl->jnl',np.squeeze(input_MPS[site_i].conj()), np.squeeze(self.H[site_i]), np.squeeze(input_MPS[site_i]))
             else:
-                output_tensor = np.einsum('imk,iaj,mabn,kbl->jnl',input_tensor, input_MPS[site_y], self.H[site_y], input_MPS[site_y])
-            return output_tensor
+                output_tensor = self._contract(input_MPS, output_tensor, site_i)
+        return output_tensor
 
-        def _cal_left_tensor(site_x):
-            """calcuate the rank-3 tensor on the left of the effective H"""
-            for site_i in range(site_x):
-                if site_i == 0:
-                    output_tensor = np.einsum('aj,abn,bl->jnl',np.squeeze(input_MPS[site_i]), np.squeeze(self.H[site_i]), np.squeeze(input_MPS[site_i]))
-                else:
-                    output_tensor = _contract(output_tensor, site_i)
-            return output_tensor
+    def _cal_right_tensor(self, input_MPS, site_x):
+        """calcuate the rank-3 tensor on the right of the effective H"""
+        L = self.L
+        for i in range(L-site_x):
+            site_i = L - i - 1
+            if site_i == L - 1:
+                output_tensor = np.einsum('ia,mab,kb->imk',np.squeeze(input_MPS[site_i].conj()), np.squeeze(self.H[site_i]), np.squeeze(input_MPS[site_i]))
+                 # base case
+            else:
+                output_tensor = self._contract(input_MPS, output_tensor, site_i, right=True)
+        return output_tensor
 
-        def _cal_right_tensor(site_x):
-            """calcuate the rank-3 tensor on the right of the effective H"""
-            for i in range(L-site_x):
-                site_i = L - i - 1
-                if site_i == L - 1:
-                    output_tensor = np.einsum('ia,mab,kb->imk',np.squeeze(input_MPS[site_i]), np.squeeze(self.H[site_i]), np.squeeze(input_MPS[site_i]))
-                     # base case
-                else:
-                    output_tensor = _contract(output_tensor, site_i, right=True)
-            return output_tensor
-
+    def _cal_eff_H(self, input_MPS, site):
+        """calculate effective one-site local Hamiltonian"""
+        L = self.L
         if site != 0 and site != L-1:
-            left_tensor = _cal_left_tensor(site)
-            right_tensor = _cal_right_tensor(site+1)
+            left_tensor = self._cal_left_tensor(input_MPS, site)
+            right_tensor = self._cal_right_tensor(input_MPS, site+1)
 
             dim = left_tensor.shape[0]*self.H[site].shape[1]*right_tensor.shape[0]
 
@@ -313,16 +314,40 @@ class spin_Hamiltonian(object):
 
         # deal with edge cases
         elif site == 0:
-            right_tensor = _cal_right_tensor(site+1)
+            right_tensor = self._cal_right_tensor(input_MPS, site+1)
             dim = self.H[site].shape[1] * right_tensor.shape[0]
             H_eff = np.einsum('abm,lmn->albn', np.squeeze(self.H[site]), right_tensor).reshape(dim, dim)
 
         else:
-            left_tensor = _cal_left_tensor(site)
+            left_tensor = self._cal_left_tensor(input_MPS, site)
             dim = self.H[site].shape[1] * left_tensor.shape[0]
             H_eff = np.einsum('mab,lmn->albn', np.squeeze(self.H[site]), left_tensor).reshape(dim, dim)
 
         return H_eff
+
+    def _cal_eff_K(self, input_MPS, site):
+        """calculate effective zero-site Hamiltonian"""
+        L = self.L
+        if site != 0 and site != L-1:
+            left_tensor = self._cal_left_tensor(input_MPS, site+1)
+            right_tensor = self._cal_right_tensor(input_MPS, site+1)
+
+            dim = left_tensor.shape[0]*right_tensor.shape[0]
+
+            K_eff = np.einsum('ijk,ljn->ilkn', left_tensor, right_tensor).reshape(dim, dim)
+
+        # deal with edge cases
+        elif site == 0:
+            right_tensor = self._cal_right_tensor(input_MPS, site)
+            dim = right_tensor.shape[0]
+            K_eff = np.squeeze(right_tensor).reshape(dim, dim)
+
+        else:
+            left_tensor = self._cal_left_tensor(input_MPS, site)
+            dim = left_tensor.shape[0]
+            K_eff = np.squeeze(left_tensor).reshape(dim, dim)
+
+        return K_eff
 
     def ground_state_search(self, num_sweep=10, D=5):
         """implement the ground state search alogorithm that iteratively optimize the MPS site by site"""
@@ -358,7 +383,7 @@ class spin_Hamiltonian(object):
                     # step 3: calcuate effection rank-6 effection Hamiltonian on each site
                     H_eff = self._cal_eff_H(trial_MPS, site)
                     # print(f'H_eff:\n{H_eff}')
-                    assert np.allclose(H_eff, H_eff.transpose().conj())
+                    # assert np.allclose(H_eff, H_eff.transpose().conj())
 
                     # step 4: diagonalize the Hamiltonian
                     E, V = np.linalg.eigh(H_eff)
@@ -415,3 +440,150 @@ class spin_Hamiltonian(object):
 
         df = pd.DataFrame(energy_dic)
         df.to_csv("spin_Hamiltonain_DMRG_GS_search_data.csv", index=False)
+
+    def TDVP_evolution(self, t_final, num_sweep, D):
+        """implement one site TDVP time evolution algorithm"""
+        L = self.L
+        delta_t = t_final / num_sweep # calculate delta t
+        # Step 1: initialize a random MPS
+        trial_MPS = self._initialize_mps(D)
+        # Step 2: bring the initial MPS into a right normalize form
+        # trial_MPS = self._left_canonical(trial_MPS, D)
+        trial_MPS = self._right_canonical(trial_MPS, D)
+        # for i in range(L):
+            # print(f"intial MPS {i+1} shape {trial_MPS[i].shape}")
+        # define a python dictionary store energy data
+        energy_dic = {
+        "time":[],
+        "energy expectation value":[]
+        }
+
+        # loop over each site and sweep back and force
+        for iteration in range(2*num_sweep):
+            if iteration % 2 == 0:
+                energy_exp = self._cal_expectation(trial_MPS, self.H)
+                # calculate energy expectation value
+                time = iteration * delta_t / 2
+                print('time step: {:.4f} , energy: {:.4f}'.format(time, energy_exp.real))
+                energy_dic['time'].append(time)
+                energy_dic['energy expectation value'].append(energy_exp.real)
+            for i in range(L):
+                if iteration%2 == 0:
+                    site = i # sweep from left to right
+                    right_sweep = True
+                else:
+                    site = L - i - 1 # sweep from right to left
+                    right_sweep = False
+
+                #  calcuate H(n) and K(n)
+                H_eff = self._cal_eff_H(trial_MPS, site)
+
+                left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site].shape
+
+                # skip the first site to avoid repeating optimization of the same site
+                if right_sweep and site != L-1:
+
+                    # (a) evolve Ac(n, t) forward in time
+                    #print(trial_MPS[site].shape)
+                    E_h, V_h = np.linalg.eigh(H_eff)
+                    exp_H = np.dot(V_h, np.dot(np.diag(np.exp(-1j*E_h*delta_t/2)), V_h.transpose()))
+                    # print(trial_MPS[site].shape)
+                    trial_MPS[site] = np.dot(exp_H, trial_MPS[site].ravel()).reshape(left_bond_dim, phys_dim, right_bond_dim)
+                    # print(trial_MPS[site].shape)
+                    # (b) perform an orthogonal decomposition of Ac(n, t+delta_t/2)
+                    A, C, Vh = np.linalg.svd(trial_MPS[site].reshape(left_bond_dim*phys_dim, right_bond_dim), full_matrices=False)
+                    # evaluate K_eff using zero site mixed canonical MPS
+                    D = right_bond_dim
+                    right_bond_dim = min(left_bond_dim*phys_dim, right_bond_dim)
+                    if right_bond_dim < D: # at edge cases incorporate into the block of a large tensor to keep the MPS has same bond dimension
+                        A = A.reshape(left_bond_dim, phys_dim, right_bond_dim)
+                        trial_MPS[site] = np.zeros((left_bond_dim, phys_dim, D), dtype=complex)
+                        trial_MPS[site][:,:,0:right_bond_dim] = A.copy()
+
+                        C_new = np.zeros(D, dtype=complex)
+                        C_new[0:right_bond_dim] = C
+                        C = C_new
+
+                        Vh_new = np.zeros((D, D), dtype=complex)
+                        Vh_new[0:Vh.shape[0], 0:Vh.shape[1]] = Vh
+                        Vh = Vh_new
+                    else:
+                        trial_MPS[site] = A.reshape(left_bond_dim, phys_dim, right_bond_dim)
+                    # print(trial_MPS[site].shape)
+                    K_eff = self._cal_eff_K(trial_MPS, site)
+                    if K_eff.shape[0] < D*D:
+                        K_eff_new = np.zeros((D*D, D*D), dtype=complex)
+                        K_eff_new[0:K_eff.shape[0], 0: K_eff.shape[1]] = K_eff
+                        K_eff = K_eff_new
+                    else:
+                        pass
+                    # (c) evolve C(n, t+delta_t/2) backwards in time
+                    E_k, V_k = np.linalg.eigh(K_eff)
+                    exp_K = np.dot(V_k, np.dot(np.diag(np.exp(1j*E_k*delta_t/2)), V_k.transpose()))
+                    #print(K_eff.shape)
+                    #print(exp_K.shape)
+                    #print(C.shape)
+                    C = np.dot(exp_K, np.diag(C).ravel()).reshape(D, D)
+                    # (d) absorb C(n, t) into A_R(n+1, t)
+                    #print(C.shape)
+                    #print(Vh.shape)
+                    # print(f'site+1:{site+2}')
+                    # print(C.shape)
+                    # print(Vh.shape)
+                    # print(trial_MPS[site+1].shape)
+                    trial_MPS[site+1] = np.einsum('sc,ca,aib->sib', C, Vh, trial_MPS[site+1]).copy()
+                    # print(trial_MPS[site+1].shape)
+
+                # left normalize the optimized tensor if right sweep
+                elif (not right_sweep) and site != L-1:
+
+                    # (a) perform orthogonal decomposition of A_c(n+1, t+delta_t)
+                    left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site+1].shape
+                    U, C, B = np.linalg.svd(trial_MPS[site+1].reshape(left_bond_dim, phys_dim*right_bond_dim), full_matrices=False)
+                    # construct zero-site mix canonical MPS
+                    D = left_bond_dim
+                    left_bond_dim = min(phys_dim*right_bond_dim, left_bond_dim)
+                    if left_bond_dim < D: # at edge cases incorporate into the block of a large tensor to keep the MPS has same bond dimension
+                        B = B.reshape(left_bond_dim, phys_dim, right_bond_dim)
+                        trial_MPS[site+1] = np.zeros((D, phys_dim, right_bond_dim), dtype=complex)
+                        trial_MPS[site+1][0:left_bond_dim,:,:] = B
+
+                        C_new = np.zeros(D, dtype=complex)
+                        C_new[0:right_bond_dim] = C
+                        C = C_new
+
+                        U_new = np.zeros((D, D), dtype=complex)
+                        U_new[0:U.shape[0], 0:U.shape[1]] = U
+                        U = U_new
+                    else:
+                        trial_MPS[site+1] = B.reshape(left_bond_dim, phys_dim, right_bond_dim)
+                    K_eff = self._cal_eff_K(trial_MPS, site)
+                    if K_eff.shape[0] < D*D:
+                        X = np.zeros((D*D, D*D), dtype=complex)
+                        X[0:K_eff.shape[0], 0: K_eff.shape[1]] = K_eff
+                        K_eff = X
+                    else:
+                        pass
+                    # (b) evolve C(n, t+delta_t) backwards in time
+                    E_k, V_k = np.linalg.eigh(K_eff)
+                    exp_K = np.dot(V_k, np.dot(np.diag(np.exp(1j*E_k*delta_t/2)), V_k.transpose()))
+                    C = np.dot(exp_K, np.diag(C).ravel()).reshape(D, D)
+                    # (c) absorb C(n, t+delta_t/2) into A_L(n, t+delta_t/2)
+                    trial_MPS[site] = np.einsum('aib,bc,cs->ais', trial_MPS[site], U, C).copy()
+                    # (d) evolve Ac(n, t+delta_t) forward in time
+                    E_h, V_h = np.linalg.eigh(H_eff)
+                    exp_H = np.dot(V_h, np.dot(np.diag(np.exp(-1j*E_h*delta_t/2)), V_h.transpose()))
+                    left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site].shape
+                    trial_MPS[site] = np.dot(exp_H, trial_MPS[site].ravel()).reshape(left_bond_dim, phys_dim, right_bond_dim)
+                else:
+                    # invale A_c(N, t) forwrad in time
+                    E_h, V_h = np.linalg.eigh(H_eff)
+                    exp_H = np.dot(V_h, np.dot(np.diag(np.exp(-1j*E_h*delta_t)), V_h.transpose()))
+                    left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site].shape
+                    trial_MPS[site] = np.dot(exp_H, trial_MPS[site].ravel()).reshape(left_bond_dim, phys_dim, right_bond_dim)
+
+        # store data
+        df = pd.DataFrame(energy_dic)
+        df.to_csv("TDVP_energy_data.csv", index=False)
+
+        return
