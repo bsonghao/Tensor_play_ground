@@ -328,7 +328,7 @@ class spin_Hamiltonian(object):
     def _cal_eff_K(self, input_MPS, site):
         """calculate effective zero-site Hamiltonian"""
         L = self.L
-        if site != 0 and site != L-1:
+        if site != L-1:
             left_tensor = self._cal_left_tensor(input_MPS, site+1)
             right_tensor = self._cal_right_tensor(input_MPS, site+1)
 
@@ -336,16 +336,11 @@ class spin_Hamiltonian(object):
 
             K_eff = np.einsum('ijk,ljn->ilkn', left_tensor, right_tensor).reshape(dim, dim)
 
-        # deal with edge cases
-        elif site == 0:
-            right_tensor = self._cal_right_tensor(input_MPS, site)
-            dim = right_tensor.shape[0]
-            K_eff = np.squeeze(right_tensor).reshape(dim, dim)
-
         else:
-            left_tensor = self._cal_left_tensor(input_MPS, site)
-            dim = left_tensor.shape[0]
-            K_eff = np.squeeze(left_tensor).reshape(dim, dim)
+            pass
+            # left_tensor = self._cal_left_tensor(input_MPS, site+1)
+            # dim = left_tensor.shape[0]
+            # K_eff = np.squeeze(left_tensor).reshape(dim, dim)
 
         return K_eff
 
@@ -441,10 +436,12 @@ class spin_Hamiltonian(object):
         df = pd.DataFrame(energy_dic)
         df.to_csv("spin_Hamiltonain_DMRG_GS_search_data.csv", index=False)
 
-    def TDVP_evolution(self, t_final, num_sweep, D):
+    def TDVP_evolution(self, t_final, num_sweep, D, imagine_t):
         """implement one site TDVP time evolution algorithm"""
         L = self.L
         delta_t = t_final / num_sweep # calculate delta t
+        if imagine_t:
+            delta_t *= (-1j)
         # Step 1: initialize a random MPS
         trial_MPS = self._initialize_mps(D)
         # Step 2: bring the initial MPS into a right normalize form
@@ -460,24 +457,29 @@ class spin_Hamiltonian(object):
 
         # loop over each site and sweep back and force
         for iteration in range(2*num_sweep):
-            if iteration % 2 == 0:
+
+            if iteration%2 == 0:
+                right_sweep = True
+
+                # store energy expectation value data:
                 energy_exp = self._cal_expectation(trial_MPS, self.H)
                 # calculate energy expectation value
                 time = iteration * delta_t / 2
-                print('time step: {:.4f} , energy: {:.4f}'.format(time, energy_exp.real))
+                print('time step: {:.4f} , energy: {:.4f}'.format(time, energy_exp))
                 energy_dic['time'].append(time)
                 energy_dic['energy expectation value'].append(energy_exp.real)
+            else:
+                right_sweep = False
+
             for i in range(L):
-                if iteration%2 == 0:
-                    site = i # sweep from left to right
-                    right_sweep = True
+
+                if right_sweep:
+                    site = i
                 else:
-                    site = L - i - 1 # sweep from right to left
-                    right_sweep = False
+                    site = L - i - 1
 
-                #  calcuate H(n) and K(n)
+                #  calcuate H(n)
                 H_eff = self._cal_eff_H(trial_MPS, site)
-
                 left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site].shape
 
                 # skip the first site to avoid repeating optimization of the same site
@@ -486,7 +488,7 @@ class spin_Hamiltonian(object):
                     # (a) evolve Ac(n, t) forward in time
                     #print(trial_MPS[site].shape)
                     E_h, V_h = np.linalg.eigh(H_eff)
-                    exp_H = np.dot(V_h, np.dot(np.diag(np.exp(-1j*E_h*delta_t/2)), V_h.transpose()))
+                    exp_H = np.dot(V_h, np.dot(np.diag(np.exp(-1j*E_h*delta_t/2)), V_h.transpose().conj()))
                     # print(trial_MPS[site].shape)
                     trial_MPS[site] = np.dot(exp_H, trial_MPS[site].ravel()).reshape(left_bond_dim, phys_dim, right_bond_dim)
                     # print(trial_MPS[site].shape)
@@ -498,31 +500,26 @@ class spin_Hamiltonian(object):
                     if right_bond_dim < D: # at edge cases incorporate into the block of a large tensor to keep the MPS has same bond dimension
                         A = A.reshape(left_bond_dim, phys_dim, right_bond_dim)
                         trial_MPS[site] = np.zeros((left_bond_dim, phys_dim, D), dtype=complex)
-                        trial_MPS[site][:,:,0:right_bond_dim] = A.copy()
+                        trial_MPS[site][:,:,0:right_bond_dim] = A
 
                         C_new = np.zeros(D, dtype=complex)
                         C_new[0:right_bond_dim] = C
                         C = C_new
 
                         Vh_new = np.zeros((D, D), dtype=complex)
-                        Vh_new[0:Vh.shape[0], 0:Vh.shape[1]] = Vh
+                        Vh_new[0:Vh.shape[0],:] = Vh
                         Vh = Vh_new
                     else:
                         trial_MPS[site] = A.reshape(left_bond_dim, phys_dim, right_bond_dim)
                     # print(trial_MPS[site].shape)
                     K_eff = self._cal_eff_K(trial_MPS, site)
-                    if K_eff.shape[0] < D*D:
-                        K_eff_new = np.zeros((D*D, D*D), dtype=complex)
-                        K_eff_new[0:K_eff.shape[0], 0: K_eff.shape[1]] = K_eff
-                        K_eff = K_eff_new
-                    else:
-                        pass
                     # (c) evolve C(n, t+delta_t/2) backwards in time
                     E_k, V_k = np.linalg.eigh(K_eff)
-                    exp_K = np.dot(V_k, np.dot(np.diag(np.exp(1j*E_k*delta_t/2)), V_k.transpose()))
+                    # assert np.allclose(np.dot(V_k, V_k.transpose().conj()), np.eye(len(E_k)))
+                    exp_K = np.dot(V_k, np.dot(np.diag(np.exp(1j*E_k*delta_t/2)), V_k.transpose().conj()))
                     #print(K_eff.shape)
-                    #print(exp_K.shape)
-                    #print(C.shape)
+                    # print(exp_K.shape)
+                    # print(C.shape)
                     C = np.dot(exp_K, np.diag(C).ravel()).reshape(D, D)
                     # (d) absorb C(n, t) into A_R(n+1, t)
                     #print(C.shape)
@@ -553,32 +550,26 @@ class spin_Hamiltonian(object):
                         C = C_new
 
                         U_new = np.zeros((D, D), dtype=complex)
-                        U_new[0:U.shape[0], 0:U.shape[1]] = U
+                        U_new[:, 0:U.shape[1]] = U
                         U = U_new
                     else:
                         trial_MPS[site+1] = B.reshape(left_bond_dim, phys_dim, right_bond_dim)
                     K_eff = self._cal_eff_K(trial_MPS, site)
-                    if K_eff.shape[0] < D*D:
-                        X = np.zeros((D*D, D*D), dtype=complex)
-                        X[0:K_eff.shape[0], 0: K_eff.shape[1]] = K_eff
-                        K_eff = X
-                    else:
-                        pass
                     # (b) evolve C(n, t+delta_t) backwards in time
                     E_k, V_k = np.linalg.eigh(K_eff)
-                    exp_K = np.dot(V_k, np.dot(np.diag(np.exp(1j*E_k*delta_t/2)), V_k.transpose()))
+                    exp_K = np.dot(V_k, np.dot(np.diag(np.exp(1j*E_k*delta_t/2)), V_k.transpose().conj()))
                     C = np.dot(exp_K, np.diag(C).ravel()).reshape(D, D)
                     # (c) absorb C(n, t+delta_t/2) into A_L(n, t+delta_t/2)
                     trial_MPS[site] = np.einsum('aib,bc,cs->ais', trial_MPS[site], U, C).copy()
-                    # (d) evolve Ac(n, t+delta_t) forward in time
+                    # (d) evolve Ac(n, t+delta_t/2) forward in time
                     E_h, V_h = np.linalg.eigh(H_eff)
-                    exp_H = np.dot(V_h, np.dot(np.diag(np.exp(-1j*E_h*delta_t/2)), V_h.transpose()))
+                    exp_H = np.dot(V_h, np.dot(np.diag(np.exp(-1j*E_h*delta_t/2)), V_h.transpose().conj()))
                     left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site].shape
                     trial_MPS[site] = np.dot(exp_H, trial_MPS[site].ravel()).reshape(left_bond_dim, phys_dim, right_bond_dim)
                 else:
                     # invale A_c(N, t) forwrad in time
                     E_h, V_h = np.linalg.eigh(H_eff)
-                    exp_H = np.dot(V_h, np.dot(np.diag(np.exp(-1j*E_h*delta_t)), V_h.transpose()))
+                    exp_H = np.dot(V_h, np.dot(np.diag(np.exp(-1j*E_h*delta_t)), V_h.transpose().conj()))
                     left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site].shape
                     trial_MPS[site] = np.dot(exp_H, trial_MPS[site].ravel()).reshape(left_bond_dim, phys_dim, right_bond_dim)
 
