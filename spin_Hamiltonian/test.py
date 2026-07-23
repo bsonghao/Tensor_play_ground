@@ -11,22 +11,24 @@ import pstats
 import numpy as np
 
 # import the path to the package
-project_dir = abspath(join(dirname(__file__), '/Users/pauliebao/Tensor_play_ground/MPS_canonical/'))
+project_dir = abspath(join(dirname(__file__), '/Users/pauliebao/Tensor_play_ground/spin_Hamiltonian/'))
 sys.path.insert(0, project_dir)
 
 # local import
-from MPS_canonical import MPS_canonical
+from spin_Hamiltonian import spin_Hamiltonian
 
 def main():
     """main function for MPS decomposition algorithm"""
     # input tensor shape
-    bond_dimension = 5
-    num_state = 2
-    num_site = 10
+    L = 10
+    J = 1.
+    h = 0.
+    Jz = 0.
 
-    tensor = MPS_canonical(bond_dimension, num_state, num_site)
-    # tensor.left_canonical()
-    tensor.right_canonical()
+
+    tensor = spin_Hamiltonian(L, J, Jz, h)
+    tensor.ground_state_search(num_sweep=2, D=14)
+
 
     return
 
