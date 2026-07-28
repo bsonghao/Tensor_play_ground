@@ -20,14 +20,26 @@ import opt_einsum as oe
 
 class spin_Hamiltonian(object):
     """This class initialize a spin Hamiltonian in the form of MPO and perform munipulation on it"""
-    def __init__(self, num_site, J, Jz, h):
+    def __init__(self, num_site, J, Jz, h, chemical_shift=None):
         """
         initiize model parameter of the Hamiltonian and bring it into the MPO form
+
+        chemical_shift: optional array-like of length num_site giving a
+        per-site weight for the total magnetization (ZULF signal) operator
+        sum_i chemical_shift[i] * S_z(i); defaults to uniform weight 1
+        (plain total magnetization) if not provided. This only affects the
+        magnetization operator used for observables, not the propagating
+        Hamiltonian self.H.
         """
         self.L = num_site
         self.J = J
         self.Jz = Jz
         self.h = h
+        if chemical_shift is None:
+            chemical_shift = np.ones(num_site)
+        self.chemical_shift = np.asarray(chemical_shift, dtype=float)
+        if self.chemical_shift.shape != (num_site,):
+            raise ValueError(f"chemical_shift must have shape ({num_site},), got {self.chemical_shift.shape}")
 
         # define Pauli matrices
         self.S_x = np.array([[0, 1], [1, 0]], dtype=complex)* 0.5 # set hbar =1
@@ -87,11 +99,12 @@ class spin_Hamiltonian(object):
         self.Sz_total_MPO = self._build_total_Sz_MPO()
 
     def _build_total_Sz_MPO(self):
-        """construct the MPO for the total magnetization operator sum_i S_z(i)
+        """construct the MPO for the (chemical-shift-weighted) total
+        magnetization / ZULF-signal operator sum_i chemical_shift[i] * S_z(i)
 
         uses the same bond-state convention as self.H: bond index 0 means
-        "an S_z has already been applied, just propagate identity from here
-        on", bond index 1 means "S_z has not been applied yet"
+        "a (weighted) S_z has already been applied, just propagate identity
+        from here on", bond index 1 means "S_z has not been applied yet"
         """
         L, phys_dim = self.L, 2
         Sz_MPO = {}
@@ -99,17 +112,19 @@ class spin_Hamiltonian(object):
             left_bond_dim = 2 if site > 0 else 1
             right_bond_dim = 2 if site < L - 1 else 1
 
+            weighted_Sz = self.chemical_shift[site] * self.S_z
+
             Sz_MPO[site] = np.zeros((left_bond_dim, phys_dim, phys_dim, right_bond_dim), dtype=complex)
 
             if site != 0 and site != L - 1:
                 Sz_MPO[site][0, :, :, 0] += np.eye(phys_dim, dtype=complex)
-                Sz_MPO[site][1, :, :, 0] += self.S_z
+                Sz_MPO[site][1, :, :, 0] += weighted_Sz
                 Sz_MPO[site][1, :, :, 1] += np.eye(phys_dim, dtype=complex)
             elif site == L - 1:
                 Sz_MPO[site][0, :, :, 0] += np.eye(phys_dim, dtype=complex)
-                Sz_MPO[site][1, :, :, 0] += self.S_z
+                Sz_MPO[site][1, :, :, 0] += weighted_Sz
             else:
-                Sz_MPO[site][0, :, :, 0] += self.S_z
+                Sz_MPO[site][0, :, :, 0] += weighted_Sz
                 Sz_MPO[site][0, :, :, 1] += np.eye(phys_dim, dtype=complex)
 
         return Sz_MPO

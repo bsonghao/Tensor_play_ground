@@ -22,13 +22,14 @@ def main():
     # input tensor shape
     L = 10
     J = 1.
-    h = 0.
-    Jz = 0.
+    h = 1.
+    Jz = 1.
+    chemical_shift = np.random.rand(L)
 
 
-    tensor = spin_Hamiltonian(L, J, Jz, h)
+    tensor = spin_Hamiltonian(L, J, Jz, h, chemical_shift)
     # tensor.ground_state_search(num_sweep=2, D=14)
-    tensor.TDVP_evolution(t_final=1, num_sweep=200, D=4, imagine_t=False)
+    tensor.TDVP_evolution(t_final=10, num_sweep=200, D=4, imagine_t=False)
 
 
     return
