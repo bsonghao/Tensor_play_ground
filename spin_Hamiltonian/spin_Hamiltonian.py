@@ -492,159 +492,138 @@ class spin_Hamiltonian(object):
         df.to_csv("spin_Hamiltonain_DMRG_GS_search_data.csv", index=False)
 
     def TDVP_evolution(self, t_final, num_sweep, D, imagine_t):
-        """implement one site TDVP time evolution algorithm"""
+        """1-site TDVP time evolution, following the algorithm at
+        https://tensornetwork.org/mps/algorithms/timeevo/tdvp.html
+
+        Each full period (one right sweep + one left sweep) advances the
+        state by delta_t: every site is forward-evolved by delta_t/2 in
+        each sweep (no special-cased boundary "full step"), and every bond
+        is backward-evolved by delta_t/2 in each sweep. Left/right
+        environments (L_env, R_env) are cached and updated incrementally
+        rather than recomputed from scratch at each site.
+        """
         L = self.L
-        delta_t = t_final / num_sweep # calculate delta t
+        delta_t = t_final / num_sweep
         if imagine_t:
             delta_t *= (-1j)
-        # Step 1: initialize the MPS with all spins aligned along +Z
-        trial_MPS = self._initialize_mps_all_up(D)
-        # Step 2: bring the initial MPS into a right normalize form
-        # trial_MPS = self._left_canonical(trial_MPS, D)
+
+        trial_MPS = self._initialize_mps(D)
         trial_MPS = self._right_canonical(trial_MPS, D)
-        # for i in range(L):
-            # print(f"intial MPS {i+1} shape {trial_MPS[i].shape}")
-        # define a python dictionary store energy and magnetization data
+
         energy_dic = {
-        "time":[],
-        "energy expectation value":[],
-        "total magnetization":[]
+            "time": [],
+            "energy expectation value": [],
+            "total magnetization": []
         }
 
-        # loop over each site and sweep back and force
-        for iteration in range(2*num_sweep):
+        trivial_env = np.ones((1, 1, 1), dtype=complex)
 
-            if iteration%2 == 0:
-                right_sweep = True
+        def contract_left(Lenv, A, site):
+            """L_j = CONTRACT-LEFT(L_{j-1}, W_j, A_j)"""
+            return np.einsum('imk,iaj,mabn,kbl->jnl', Lenv, A.conj(), self.H[site], A)
 
-                # store energy expectation value data:
-                energy_exp = self._cal_expectation(trial_MPS, self.H)
-                # calculate the total magnetization expectation value
-                magnetization = self._cal_expectation(trial_MPS, self.Sz_total_MPO)
-                # calculate energy expectation value
-                time = iteration * delta_t / 2
-                print('time step: {:.4f} , energy: {:.4f}, magnetization: {:.4f}'.format(time, energy_exp, magnetization.real))
-                energy_dic['time'].append(time)
-                energy_dic['energy expectation value'].append(energy_exp.real)
-                energy_dic['total magnetization'].append(magnetization.real)
-            else:
-                right_sweep = False
+        def contract_right(Renv, B, site):
+            """R_j = CONTRACT-RIGHT(R_{j+1}, W_j, B_j)"""
+            return np.einsum('jnl,iaj,mabn,kbl->imk', Renv, B.conj(), self.H[site], B)
 
-            for i in range(L):
+        def build_Heff(Lenv, site, Renv):
+            """H_eff = L_{j-1} . W_j . R_{j+1}, reshaped to match M.ravel() order"""
+            p = Lenv.shape[0]
+            r = Renv.shape[0]
+            W = self.H[site]
+            tensor = np.einsum('pmq,mabn,rns->parqbs', Lenv, W, Renv)
+            dim = p * W.shape[1] * r
+            return tensor.reshape(dim, dim)
 
-                if right_sweep:
-                    site = i
-                else:
-                    site = L - i - 1
+        def build_Keff(Lenv, Renv):
+            """K_eff = L_j . R_{j+1} (no local operator), reshaped to match C.ravel() order"""
+            p = Lenv.shape[0]
+            r = Renv.shape[0]
+            tensor = np.einsum('pmq,rms->prqs', Lenv, Renv)
+            dim = p * r
+            return tensor.reshape(dim, dim)
 
-                # site L-1 was already evolved by a full time step at the
-                # end of the right sweep (see the final else-branch below);
-                # skip it here to avoid evolving it twice
-                if (not right_sweep) and site == L - 1:
-                    continue
+        def expm_apply(H_matrix, vec, coeff):
+            """apply exp(-1j * H_matrix * coeff) to vec"""
+            E, V = np.linalg.eigh(H_matrix)
+            expH = V @ np.diag(np.exp(-1j * E * coeff)) @ V.conj().T
+            return expH @ vec
 
-                left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site].shape
+        def record(trial_MPS, time):
+            energy_exp = self._cal_expectation(trial_MPS, self.H)
+            magnetization = self._cal_expectation(trial_MPS, self.Sz_total_MPO)
+            print('time step: {:.4f} , energy: {:.4f}, magnetization: {:.4f}'.format(
+                time, energy_exp, magnetization.real))
+            energy_dic['time'].append(time)
+            energy_dic['energy expectation value'].append(energy_exp.real)
+            energy_dic['total magnetization'].append(magnetization.real)
 
-                # skip the first site to avoid repeating optimization of the same site
-                if right_sweep and site != L-1:
+        # precompute the initial right environments (state starts right-canonical)
+        R_env = {L: trivial_env}
+        for site in range(L - 1, -1, -1):
+            R_env[site] = contract_right(R_env[site + 1], trial_MPS[site], site)
 
-                    #  calcuate H(n)
-                    H_eff = self._cal_eff_H(trial_MPS, site)
+        L_env = {-1: trivial_env}
 
-                    # (a) evolve Ac(n, t) forward in time
-                    #print(trial_MPS[site].shape)
-                    E_h, V_h = np.linalg.eigh(H_eff)
-                    exp_H = np.dot(V_h, np.dot(np.diag(np.exp(-1j*E_h*delta_t/2)), V_h.transpose().conj()))
-                    # print(trial_MPS[site].shape)
-                    trial_MPS[site] = np.dot(exp_H, trial_MPS[site].ravel()).reshape(left_bond_dim, phys_dim, right_bond_dim)
-                    # print(trial_MPS[site].shape)
-                    # (b) perform an orthogonal decomposition of Ac(n, t+delta_t/2)
-                    A, C, Vh = np.linalg.svd(trial_MPS[site].reshape(left_bond_dim*phys_dim, right_bond_dim), full_matrices=False)
-                    # evaluate K_eff using zero site mixed canonical MPS
-                    D = right_bond_dim
-                    right_bond_dim = min(left_bond_dim*phys_dim, right_bond_dim)
-                    if right_bond_dim < D: # at edge cases incorporate into the block of a large tensor to keep the MPS has same bond dimension
-                        A = A.reshape(left_bond_dim, phys_dim, right_bond_dim)
-                        trial_MPS[site] = np.zeros((left_bond_dim, phys_dim, D), dtype=complex)
-                        trial_MPS[site][:,:,0:right_bond_dim] = A
+        for period in range(num_sweep):
+            record(trial_MPS, period * delta_t)
 
-                        C_new = np.zeros(D, dtype=complex)
-                        C_new[0:right_bond_dim] = C
-                        C = C_new
+            # ---- SWEEP RIGHT (updates L_env, uses the static R_env) ----
+            L_env = {-1: trivial_env}
+            for site in range(L):
+                Lenv = L_env[site - 1]
+                Renv = R_env[site + 1]
 
-                        Vh_new = np.zeros((D, D), dtype=complex)
-                        Vh_new[0:Vh.shape[0],:] = Vh
-                        Vh = Vh_new
-                    else:
-                        trial_MPS[site] = A.reshape(left_bond_dim, phys_dim, right_bond_dim)
-                    # print(trial_MPS[site].shape)
-                    K_eff = self._cal_eff_K(trial_MPS, site)
-                    # (c) evolve C(n, t+delta_t/2) backwards in time
-                    E_k, V_k = np.linalg.eigh(K_eff)
-                    # assert np.allclose(np.dot(V_k, V_k.transpose().conj()), np.eye(len(E_k)))
-                    exp_K = np.dot(V_k, np.dot(np.diag(np.exp(1j*E_k*delta_t/2)), V_k.transpose().conj()))
-                    #print(K_eff.shape)
-                    # print(exp_K.shape)
-                    # print(C.shape)
-                    C = np.dot(exp_K, np.diag(C).ravel()).reshape(D, D)
-                    # (d) absorb C(n, t) into A_R(n+1, t)
-                    #print(C.shape)
-                    #print(Vh.shape)
-                    # print(f'site+1:{site+2}')
-                    # print(C.shape)
-                    # print(Vh.shape)
-                    # print(trial_MPS[site+1].shape)
-                    trial_MPS[site+1] = np.einsum('sc,ca,aib->sib', C, Vh, trial_MPS[site+1]).copy()
-                    # print(trial_MPS[site+1].shape)
+                # (a) evolve A_C(site) forward by delta_t/2
+                shape = trial_MPS[site].shape
+                H_eff = build_Heff(Lenv, site, Renv)
+                trial_MPS[site] = expm_apply(H_eff, trial_MPS[site].ravel(), delta_t / 2).reshape(shape)
 
-                # left normalize the optimized tensor if right sweep
-                elif (not right_sweep) and site != L-1:
+                # (b) QR decompose into left-orthonormal A_site and bond matrix C
+                left_bond_dim, phys_dim, right_bond_dim = shape
+                Q, C = np.linalg.qr(trial_MPS[site].reshape(left_bond_dim * phys_dim, right_bond_dim))
+                k = Q.shape[1]
+                trial_MPS[site] = Q.reshape(left_bond_dim, phys_dim, k)
 
-                    # (a) perform orthogonal decomposition of A_c(n+1, t+delta_t)
-                    left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site+1].shape
-                    U, C, B = np.linalg.svd(trial_MPS[site+1].reshape(left_bond_dim, phys_dim*right_bond_dim), full_matrices=False)
-                    # construct zero-site mix canonical MPS
-                    D = left_bond_dim
-                    left_bond_dim = min(phys_dim*right_bond_dim, left_bond_dim)
-                    if left_bond_dim < D: # at edge cases incorporate into the block of a large tensor to keep the MPS has same bond dimension
-                        B = B.reshape(left_bond_dim, phys_dim, right_bond_dim)
-                        trial_MPS[site+1] = np.zeros((D, phys_dim, right_bond_dim), dtype=complex)
-                        trial_MPS[site+1][0:left_bond_dim,:,:] = B
+                # (c) update the left environment with the new isometry
+                L_env[site] = contract_left(Lenv, trial_MPS[site], site)
 
-                        C_new = np.zeros(D, dtype=complex)
-                        C_new[0:left_bond_dim] = C
-                        C = C_new
+                if site != L - 1:
+                    # (d) evolve the bond matrix backward by delta_t/2
+                    K_eff = build_Keff(L_env[site], Renv)
+                    C = expm_apply(K_eff, C.ravel(), -delta_t / 2).reshape(C.shape)
+                    # (e) absorb C into the next site
+                    trial_MPS[site + 1] = np.einsum('ac,cib->aib', C, trial_MPS[site + 1])
 
-                        U_new = np.zeros((D, D), dtype=complex)
-                        U_new[:, 0:U.shape[1]] = U
-                        U = U_new
-                    else:
-                        trial_MPS[site+1] = B.reshape(left_bond_dim, phys_dim, right_bond_dim)
-                    K_eff = self._cal_eff_K(trial_MPS, site)
-                    # (b) evolve C(n, t+delta_t) backwards in time
-                    E_k, V_k = np.linalg.eigh(K_eff)
-                    exp_K = np.dot(V_k, np.dot(np.diag(np.exp(1j*E_k*delta_t/2)), V_k.transpose().conj()))
-                    C = np.dot(exp_K, np.diag(C).ravel()).reshape(D, D)
-                    # (c) absorb C(n, t+delta_t/2) into A_L(n, t+delta_t/2)
-                    trial_MPS[site] = np.einsum('aib,bc,cs->ais', trial_MPS[site], U, C).copy()
-                    # (d) evolve Ac(n, t+delta_t/2) forward in time
-                    # recompute H_eff here: site+1 has just been made
-                    # right-canonical above, which H_eff(site) depends on
-                    H_eff = self._cal_eff_H(trial_MPS, site)
-                    E_h, V_h = np.linalg.eigh(H_eff)
-                    exp_H = np.dot(V_h, np.dot(np.diag(np.exp(-1j*E_h*delta_t/2)), V_h.transpose().conj()))
-                    left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site].shape
-                    trial_MPS[site] = np.dot(exp_H, trial_MPS[site].ravel()).reshape(left_bond_dim, phys_dim, right_bond_dim)
-                else:
-                    # evolve A_c(L-1, t) forward in time by a full step
-                    # (this replaces what would otherwise be two half-steps
-                    # split across the end of the right sweep and the start
-                    # of the left sweep)
-                    H_eff = self._cal_eff_H(trial_MPS, site)
-                    E_h, V_h = np.linalg.eigh(H_eff)
-                    exp_H = np.dot(V_h, np.dot(np.diag(np.exp(-1j*E_h*delta_t)), V_h.transpose().conj()))
-                    left_bond_dim, phys_dim, right_bond_dim = trial_MPS[site].shape
-                    trial_MPS[site] = np.dot(exp_H, trial_MPS[site].ravel()).reshape(left_bond_dim, phys_dim, right_bond_dim)
+            # ---- SWEEP LEFT (updates R_env, uses the static L_env) ----
+            R_env = {L: trivial_env}
+            for site in range(L - 1, -1, -1):
+                Lenv = L_env[site - 1]
+                Renv = R_env[site + 1]
+
+                # (a) evolve A_C(site) forward by delta_t/2
+                shape = trial_MPS[site].shape
+                H_eff = build_Heff(Lenv, site, Renv)
+                trial_MPS[site] = expm_apply(H_eff, trial_MPS[site].ravel(), delta_t / 2).reshape(shape)
+
+                # (b) QR decompose (from the right) into right-orthonormal B_site and bond matrix C
+                left_bond_dim, phys_dim, right_bond_dim = shape
+                Q, R_factor = np.linalg.qr(trial_MPS[site].reshape(left_bond_dim, phys_dim * right_bond_dim).T)
+                k = Q.shape[1]
+                trial_MPS[site] = Q.T.reshape(k, phys_dim, right_bond_dim)
+                C = R_factor.T  # shape (left_bond_dim, k)
+
+                # (c) update the right environment with the new isometry
+                R_env[site] = contract_right(Renv, trial_MPS[site], site)
+
+                if site != 0:
+                    # (d) evolve the bond matrix backward by delta_t/2
+                    K_eff = build_Keff(L_env[site - 1], R_env[site])
+                    C = expm_apply(K_eff, C.ravel(), -delta_t / 2).reshape(C.shape)
+                    # (e) absorb C into the previous site
+                    trial_MPS[site - 1] = np.einsum('aib,bc->aic', trial_MPS[site - 1], C)
+
+        record(trial_MPS, num_sweep * delta_t)
 
         # store data
         df = pd.DataFrame(energy_dic)
