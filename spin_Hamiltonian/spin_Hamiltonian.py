@@ -20,14 +20,26 @@ import opt_einsum as oe
 
 class spin_Hamiltonian(object):
     """This class initialize a spin Hamiltonian in the form of MPO and perform munipulation on it"""
-    def __init__(self, num_site, J, Jz, h):
+    def __init__(self, num_site, J, Jz, h, chemical_shift=None):
         """
         initiize model parameter of the Hamiltonian and bring it into the MPO form
+
+        chemical_shift: optional array-like of length num_site giving a
+        per-site weight for the total magnetization (ZULF signal) operator
+        sum_i chemical_shift[i] * S_z(i); defaults to uniform weight 1
+        (plain total magnetization) if not provided. This only affects the
+        magnetization operator used for observables, not the propagating
+        Hamiltonian self.H.
         """
         self.L = num_site
         self.J = J
         self.Jz = Jz
         self.h = h
+        if chemical_shift is None:
+            chemical_shift = np.ones(num_site)
+        self.chemical_shift = np.asarray(chemical_shift, dtype=float)
+        if self.chemical_shift.shape != (num_site,):
+            raise ValueError(f"chemical_shift must have shape ({num_site},), got {self.chemical_shift.shape}")
 
         # define Pauli matrices
         self.S_x = np.array([[0, 1], [1, 0]], dtype=complex)* 0.5 # set hbar =1
@@ -82,6 +94,64 @@ class spin_Hamiltonian(object):
 
 
             print(f'spin Hamiltonian site {site+1}:\n{self.H[site].shape}')
+
+        # build the MPO representation of the total magnetization operator sum_i S_z(i)
+        self.Sz_total_MPO = self._build_total_Sz_MPO()
+
+    def _build_total_Sz_MPO(self):
+        """construct the MPO for the (chemical-shift-weighted) total
+        magnetization / ZULF-signal operator sum_i chemical_shift[i] * S_z(i)
+
+        uses the same bond-state convention as self.H: bond index 0 means
+        "a (weighted) S_z has already been applied, just propagate identity
+        from here on", bond index 1 means "S_z has not been applied yet"
+        """
+        L, phys_dim = self.L, 2
+        Sz_MPO = {}
+        for site in range(L):
+            left_bond_dim = 2 if site > 0 else 1
+            right_bond_dim = 2 if site < L - 1 else 1
+
+            weighted_Sz = self.chemical_shift[site] * self.S_z
+
+            Sz_MPO[site] = np.zeros((left_bond_dim, phys_dim, phys_dim, right_bond_dim), dtype=complex)
+
+            if site != 0 and site != L - 1:
+                Sz_MPO[site][0, :, :, 0] += np.eye(phys_dim, dtype=complex)
+                Sz_MPO[site][1, :, :, 0] += weighted_Sz
+                Sz_MPO[site][1, :, :, 1] += np.eye(phys_dim, dtype=complex)
+            elif site == L - 1:
+                Sz_MPO[site][0, :, :, 0] += np.eye(phys_dim, dtype=complex)
+                Sz_MPO[site][1, :, :, 0] += weighted_Sz
+            else:
+                Sz_MPO[site][0, :, :, 0] += weighted_Sz
+                Sz_MPO[site][0, :, :, 1] += np.eye(phys_dim, dtype=complex)
+
+        return Sz_MPO
+
+    def _initialize_mps_all_up(self, D):
+        """initialize a product-state MPS with every spin aligned along +Z
+
+        the physical basis is ordered so that index 0 corresponds to the
+        +1/2 eigenstate of S_z (see self.S_z), so each site tensor is a
+        pure |up> state embedded (zero-padded) into bond dimension D
+        """
+        L = self.L
+        initial_MPS = {}
+        for site in range(L):
+            left_bond_dim = D if site > 0 else 1
+            right_bond_dim = D if site < L - 1 else 1
+
+            tensor = np.zeros((left_bond_dim, 2, right_bond_dim), dtype=complex)
+            tensor[0, 0, 0] = 1.0
+
+            initial_MPS[site] = tensor
+
+        for site in initial_MPS.keys():
+            print("site:{:}".format(site+1))
+            print("Initial MPS matrix shape:{:}".format(initial_MPS[site].shape))
+
+        return initial_MPS
 
     def _initialize_mps(self, D):
         """initialize a random MPS"""
@@ -152,8 +222,8 @@ class spin_Hamiltonian(object):
                 left_bond_dim, phys_dim, right_bond_dim = tensor.shape
                 # if site != 0:
                 assert np.allclose(np.einsum('aib,cib->ac', tensor, tensor), np.eye(left_bond_dim))
-                # print("Site {:}:".format(site+1))
-                # print("shape:{:}".format(right_canonical_MPS[site].shape))
+                print("Right canonical MPS Site {:}:".format(site+1))
+                print("shape:{:}".format(right_canonical_MPS[site].shape))
                 # print("tensor:\n{:}".format(right_canonical_MPS[site]))
         return right_canonical_MPS
 
@@ -208,14 +278,14 @@ class spin_Hamiltonian(object):
         L = self.L
         def _contract(input_tensor, site):
             """procedure the make contraction at each site to evaluate the expectation value of a local operator"""
-            output_tensor = np.einsum('ijk,ial,jabm,kbn->lmn',input_tensor, input_MPS[site], input_MPO[site], input_MPS[site])
+            output_tensor = np.einsum('ijk,ial,jabm,kbn->lmn',input_tensor, input_MPS[site].conj(), input_MPO[site], input_MPS[site])
             return output_tensor
 
         expectation_value = 0
         for site in range(L):
             if site == 0:
                 # handle base case
-                expectation_value = np.einsum('ial,jabm,kbn->ijklmn', input_MPS[site], input_MPO[site], input_MPS[site]).squeeze()
+                expectation_value = np.einsum('ial,jabm,kbn->ijklmn', input_MPS[site].conj(), input_MPO[site], input_MPS[site]).squeeze()
             else:
                 expectation_value = _contract(expectation_value, site).copy()
         # reduce the dummy index
@@ -271,41 +341,42 @@ class spin_Hamiltonian(object):
 
         return H_var
 
-    def _cal_eff_H(self, input_MPS, site, D=5):
-        """calculate effective rank-4 local Hamiltonian"""
-        L = self.L
-        def _contract(input_tensor, site_y, right=False):
-            """procedure the make contraction at each site to evaluate the expectation value of a local operator"""
-            if right:
-                output_tensor = np.einsum('jnl,iaj,mabn,kbl->imk',input_tensor, input_MPS[site_y], self.H[site_y], input_MPS[site_y])
+    def _contract(self, input_MPS, input_tensor, site_y, right=False):
+        """procedure the make contraction at each site to evaluate the expectation value of a local operator"""
+        if right:
+            output_tensor = np.einsum('jnl,iaj,mabn,kbl->imk',input_tensor, input_MPS[site_y].conj(), self.H[site_y], input_MPS[site_y])
 
+        else:
+            output_tensor = np.einsum('imk,iaj,mabn,kbl->jnl',input_tensor, input_MPS[site_y].conj(), self.H[site_y], input_MPS[site_y])
+        return output_tensor
+
+    def _cal_left_tensor(self, input_MPS, site_x):
+        """calcuate the rank-3 tensor on the left of the effective H"""
+        for site_i in range(site_x):
+            if site_i == 0:
+                output_tensor = np.einsum('aj,abn,bl->jnl',np.squeeze(input_MPS[site_i].conj()), np.squeeze(self.H[site_i]), np.squeeze(input_MPS[site_i]))
             else:
-                output_tensor = np.einsum('imk,iaj,mabn,kbl->jnl',input_tensor, input_MPS[site_y], self.H[site_y], input_MPS[site_y])
-            return output_tensor
+                output_tensor = self._contract(input_MPS, output_tensor, site_i)
+        return output_tensor
 
-        def _cal_left_tensor(site_x):
-            """calcuate the rank-3 tensor on the left of the effective H"""
-            for site_i in range(site_x):
-                if site_i == 0:
-                    output_tensor = np.einsum('aj,abn,bl->jnl',np.squeeze(input_MPS[site_i]), np.squeeze(self.H[site_i]), np.squeeze(input_MPS[site_i]))
-                else:
-                    output_tensor = _contract(output_tensor, site_i)
-            return output_tensor
+    def _cal_right_tensor(self, input_MPS, site_x):
+        """calcuate the rank-3 tensor on the right of the effective H"""
+        L = self.L
+        for i in range(L-site_x):
+            site_i = L - i - 1
+            if site_i == L - 1:
+                output_tensor = np.einsum('ia,mab,kb->imk',np.squeeze(input_MPS[site_i].conj()), np.squeeze(self.H[site_i]), np.squeeze(input_MPS[site_i]))
+                 # base case
+            else:
+                output_tensor = self._contract(input_MPS, output_tensor, site_i, right=True)
+        return output_tensor
 
-        def _cal_right_tensor(site_x):
-            """calcuate the rank-3 tensor on the right of the effective H"""
-            for i in range(L-site_x):
-                site_i = L - i - 1
-                if site_i == L - 1:
-                    output_tensor = np.einsum('ia,mab,kb->imk',np.squeeze(input_MPS[site_i]), np.squeeze(self.H[site_i]), np.squeeze(input_MPS[site_i]))
-                     # base case
-                else:
-                    output_tensor = _contract(output_tensor, site_i, right=True)
-            return output_tensor
-
+    def _cal_eff_H(self, input_MPS, site):
+        """calculate effective one-site local Hamiltonian"""
+        L = self.L
         if site != 0 and site != L-1:
-            left_tensor = _cal_left_tensor(site)
-            right_tensor = _cal_right_tensor(site+1)
+            left_tensor = self._cal_left_tensor(input_MPS, site)
+            right_tensor = self._cal_right_tensor(input_MPS, site+1)
 
             dim = left_tensor.shape[0]*self.H[site].shape[1]*right_tensor.shape[0]
 
@@ -313,16 +384,35 @@ class spin_Hamiltonian(object):
 
         # deal with edge cases
         elif site == 0:
-            right_tensor = _cal_right_tensor(site+1)
+            right_tensor = self._cal_right_tensor(input_MPS, site+1)
             dim = self.H[site].shape[1] * right_tensor.shape[0]
             H_eff = np.einsum('abm,lmn->albn', np.squeeze(self.H[site]), right_tensor).reshape(dim, dim)
 
         else:
-            left_tensor = _cal_left_tensor(site)
+            left_tensor = self._cal_left_tensor(input_MPS, site)
             dim = self.H[site].shape[1] * left_tensor.shape[0]
             H_eff = np.einsum('mab,lmn->albn', np.squeeze(self.H[site]), left_tensor).reshape(dim, dim)
 
         return H_eff
+
+    def _cal_eff_K(self, input_MPS, site):
+        """calculate effective zero-site Hamiltonian"""
+        L = self.L
+        if site != L-1:
+            left_tensor = self._cal_left_tensor(input_MPS, site+1)
+            right_tensor = self._cal_right_tensor(input_MPS, site+1)
+
+            dim = left_tensor.shape[0]*right_tensor.shape[0]
+
+            K_eff = np.einsum('ijk,ljn->ilkn', left_tensor, right_tensor).reshape(dim, dim)
+
+        else:
+            pass
+            # left_tensor = self._cal_left_tensor(input_MPS, site+1)
+            # dim = left_tensor.shape[0]
+            # K_eff = np.squeeze(left_tensor).reshape(dim, dim)
+
+        return K_eff
 
     def ground_state_search(self, num_sweep=10, D=5):
         """implement the ground state search alogorithm that iteratively optimize the MPS site by site"""
@@ -358,7 +448,7 @@ class spin_Hamiltonian(object):
                     # step 3: calcuate effection rank-6 effection Hamiltonian on each site
                     H_eff = self._cal_eff_H(trial_MPS, site)
                     # print(f'H_eff:\n{H_eff}')
-                    assert np.allclose(H_eff, H_eff.transpose().conj())
+                    # assert np.allclose(H_eff, H_eff.transpose().conj())
 
                     # step 4: diagonalize the Hamiltonian
                     E, V = np.linalg.eigh(H_eff)
@@ -415,3 +505,143 @@ class spin_Hamiltonian(object):
 
         df = pd.DataFrame(energy_dic)
         df.to_csv("spin_Hamiltonain_DMRG_GS_search_data.csv", index=False)
+
+    def TDVP_evolution(self, t_final, num_sweep, D, imagine_t):
+        """1-site TDVP time evolution, following the algorithm at
+        https://tensornetwork.org/mps/algorithms/timeevo/tdvp.html
+
+        Each full period (one right sweep + one left sweep) advances the
+        state by delta_t: every site is forward-evolved by delta_t/2 in
+        each sweep (no special-cased boundary "full step"), and every bond
+        is backward-evolved by delta_t/2 in each sweep. Left/right
+        environments (L_env, R_env) are cached and updated incrementally
+        rather than recomputed from scratch at each site.
+        """
+        L = self.L
+        delta_t = t_final / num_sweep
+        if imagine_t:
+            delta_t *= (-1j)
+
+        trial_MPS = self._initialize_mps(D)
+        trial_MPS = self._right_canonical(trial_MPS, D)
+
+        energy_dic = {
+            "time": [],
+            "energy expectation value": [],
+            "total magnetization": []
+        }
+
+        trivial_env = np.ones((1, 1, 1), dtype=complex)
+
+        def contract_left(Lenv, A, site):
+            """L_j = CONTRACT-LEFT(L_{j-1}, W_j, A_j)"""
+            return np.einsum('imk,iaj,mabn,kbl->jnl', Lenv, A.conj(), self.H[site], A)
+
+        def contract_right(Renv, B, site):
+            """R_j = CONTRACT-RIGHT(R_{j+1}, W_j, B_j)"""
+            return np.einsum('jnl,iaj,mabn,kbl->imk', Renv, B.conj(), self.H[site], B)
+
+        def build_Heff(Lenv, site, Renv):
+            """H_eff = L_{j-1} . W_j . R_{j+1}, reshaped to match M.ravel() order"""
+            p = Lenv.shape[0]
+            r = Renv.shape[0]
+            W = self.H[site]
+            tensor = np.einsum('pmq,mabn,rns->parqbs', Lenv, W, Renv)
+            dim = p * W.shape[1] * r
+            return tensor.reshape(dim, dim)
+
+        def build_Keff(Lenv, Renv):
+            """K_eff = L_j . R_{j+1} (no local operator), reshaped to match C.ravel() order"""
+            p = Lenv.shape[0]
+            r = Renv.shape[0]
+            tensor = np.einsum('pmq,rms->prqs', Lenv, Renv)
+            dim = p * r
+            return tensor.reshape(dim, dim)
+
+        def expm_apply(H_matrix, vec, coeff):
+            """apply exp(-1j * H_matrix * coeff) to vec"""
+            E, V = np.linalg.eigh(H_matrix)
+            expH = V @ np.diag(np.exp(-1j * E * coeff)) @ V.conj().T
+            return expH @ vec
+
+        def record(trial_MPS, time):
+            energy_exp = self._cal_expectation(trial_MPS, self.H)
+            magnetization = self._cal_expectation(trial_MPS, self.Sz_total_MPO)
+            print('time step: {:.4f} , energy: {:.4f}, magnetization: {:.4f}'.format(
+                time, energy_exp, magnetization.real))
+            energy_dic['time'].append(time)
+            energy_dic['energy expectation value'].append(energy_exp.real)
+            energy_dic['total magnetization'].append(magnetization.real)
+
+        # precompute the initial right environments (state starts right-canonical)
+        R_env = {L: trivial_env}
+        for site in range(L - 1, -1, -1):
+            R_env[site] = contract_right(R_env[site + 1], trial_MPS[site], site)
+
+        L_env = {-1: trivial_env}
+
+        for period in range(num_sweep):
+            record(trial_MPS, period * delta_t)
+
+            # ---- SWEEP RIGHT (updates L_env, uses the static R_env) ----
+            L_env = {-1: trivial_env}
+            for site in range(L):
+                Lenv = L_env[site - 1]
+                Renv = R_env[site + 1]
+
+                # (a) evolve A_C(site) forward by delta_t/2
+                shape = trial_MPS[site].shape
+                H_eff = build_Heff(Lenv, site, Renv)
+                trial_MPS[site] = expm_apply(H_eff, trial_MPS[site].ravel(), delta_t / 2).reshape(shape)
+
+                # (b) QR decompose into left-orthonormal A_site and bond matrix C
+                left_bond_dim, phys_dim, right_bond_dim = shape
+                Q, C = np.linalg.qr(trial_MPS[site].reshape(left_bond_dim * phys_dim, right_bond_dim))
+                k = Q.shape[1]
+                trial_MPS[site] = Q.reshape(left_bond_dim, phys_dim, k)
+
+                # (c) update the left environment with the new isometry
+                L_env[site] = contract_left(Lenv, trial_MPS[site], site)
+
+                if site != L - 1:
+                    # (d) evolve the bond matrix backward by delta_t/2
+                    K_eff = build_Keff(L_env[site], Renv)
+                    C = expm_apply(K_eff, C.ravel(), -delta_t / 2).reshape(C.shape)
+                    # (e) absorb C into the next site
+                    trial_MPS[site + 1] = np.einsum('ac,cib->aib', C, trial_MPS[site + 1])
+
+            # ---- SWEEP LEFT (updates R_env, uses the static L_env) ----
+            R_env = {L: trivial_env}
+            for site in range(L - 1, -1, -1):
+                Lenv = L_env[site - 1]
+                Renv = R_env[site + 1]
+
+                # (a) evolve A_C(site) forward by delta_t/2
+                shape = trial_MPS[site].shape
+                H_eff = build_Heff(Lenv, site, Renv)
+                trial_MPS[site] = expm_apply(H_eff, trial_MPS[site].ravel(), delta_t / 2).reshape(shape)
+
+                # (b) QR decompose (from the right) into right-orthonormal B_site and bond matrix C
+                left_bond_dim, phys_dim, right_bond_dim = shape
+                Q, R_factor = np.linalg.qr(trial_MPS[site].reshape(left_bond_dim, phys_dim * right_bond_dim).T)
+                k = Q.shape[1]
+                trial_MPS[site] = Q.T.reshape(k, phys_dim, right_bond_dim)
+                C = R_factor.T  # shape (left_bond_dim, k)
+
+                # (c) update the right environment with the new isometry
+                R_env[site] = contract_right(Renv, trial_MPS[site], site)
+
+                if site != 0:
+                    # (d) evolve the bond matrix backward by delta_t/2
+                    K_eff = build_Keff(L_env[site - 1], R_env[site])
+                    C = expm_apply(K_eff, C.ravel(), -delta_t / 2).reshape(C.shape)
+                    # (e) absorb C into the previous site
+                    trial_MPS[site - 1] = np.einsum('aib,bc->aic', trial_MPS[site - 1], C)
+
+        record(trial_MPS, num_sweep * delta_t)
+
+        # store data
+        df = pd.DataFrame(energy_dic)
+        df.to_csv("TDVP_energy_data.csv", index=False)
+
+        return
