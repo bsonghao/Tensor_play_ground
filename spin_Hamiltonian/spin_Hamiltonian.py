@@ -83,6 +83,61 @@ class spin_Hamiltonian(object):
 
             print(f'spin Hamiltonian site {site+1}:\n{self.H[site].shape}')
 
+        # build the MPO representation of the total magnetization operator sum_i S_z(i)
+        self.Sz_total_MPO = self._build_total_Sz_MPO()
+
+    def _build_total_Sz_MPO(self):
+        """construct the MPO for the total magnetization operator sum_i S_z(i)
+
+        uses the same bond-state convention as self.H: bond index 0 means
+        "an S_z has already been applied, just propagate identity from here
+        on", bond index 1 means "S_z has not been applied yet"
+        """
+        L, phys_dim = self.L, 2
+        Sz_MPO = {}
+        for site in range(L):
+            left_bond_dim = 2 if site > 0 else 1
+            right_bond_dim = 2 if site < L - 1 else 1
+
+            Sz_MPO[site] = np.zeros((left_bond_dim, phys_dim, phys_dim, right_bond_dim), dtype=complex)
+
+            if site != 0 and site != L - 1:
+                Sz_MPO[site][0, :, :, 0] += np.eye(phys_dim, dtype=complex)
+                Sz_MPO[site][1, :, :, 0] += self.S_z
+                Sz_MPO[site][1, :, :, 1] += np.eye(phys_dim, dtype=complex)
+            elif site == L - 1:
+                Sz_MPO[site][0, :, :, 0] += np.eye(phys_dim, dtype=complex)
+                Sz_MPO[site][1, :, :, 0] += self.S_z
+            else:
+                Sz_MPO[site][0, :, :, 0] += self.S_z
+                Sz_MPO[site][0, :, :, 1] += np.eye(phys_dim, dtype=complex)
+
+        return Sz_MPO
+
+    def _initialize_mps_all_up(self, D):
+        """initialize a product-state MPS with every spin aligned along +Z
+
+        the physical basis is ordered so that index 0 corresponds to the
+        +1/2 eigenstate of S_z (see self.S_z), so each site tensor is a
+        pure |up> state embedded (zero-padded) into bond dimension D
+        """
+        L = self.L
+        initial_MPS = {}
+        for site in range(L):
+            left_bond_dim = D if site > 0 else 1
+            right_bond_dim = D if site < L - 1 else 1
+
+            tensor = np.zeros((left_bond_dim, 2, right_bond_dim), dtype=complex)
+            tensor[0, 0, 0] = 1.0
+
+            initial_MPS[site] = tensor
+
+        for site in initial_MPS.keys():
+            print("site:{:}".format(site+1))
+            print("Initial MPS matrix shape:{:}".format(initial_MPS[site].shape))
+
+        return initial_MPS
+
     def _initialize_mps(self, D):
         """initialize a random MPS"""
         L = self.L
@@ -442,17 +497,18 @@ class spin_Hamiltonian(object):
         delta_t = t_final / num_sweep # calculate delta t
         if imagine_t:
             delta_t *= (-1j)
-        # Step 1: initialize a random MPS
-        trial_MPS = self._initialize_mps(D)
+        # Step 1: initialize the MPS with all spins aligned along +Z
+        trial_MPS = self._initialize_mps_all_up(D)
         # Step 2: bring the initial MPS into a right normalize form
         # trial_MPS = self._left_canonical(trial_MPS, D)
         trial_MPS = self._right_canonical(trial_MPS, D)
         # for i in range(L):
             # print(f"intial MPS {i+1} shape {trial_MPS[i].shape}")
-        # define a python dictionary store energy data
+        # define a python dictionary store energy and magnetization data
         energy_dic = {
         "time":[],
-        "energy expectation value":[]
+        "energy expectation value":[],
+        "total magnetization":[]
         }
 
         # loop over each site and sweep back and force
@@ -463,11 +519,14 @@ class spin_Hamiltonian(object):
 
                 # store energy expectation value data:
                 energy_exp = self._cal_expectation(trial_MPS, self.H)
+                # calculate the total magnetization expectation value
+                magnetization = self._cal_expectation(trial_MPS, self.Sz_total_MPO)
                 # calculate energy expectation value
                 time = iteration * delta_t / 2
-                print('time step: {:.4f} , energy: {:.4f}'.format(time, energy_exp))
+                print('time step: {:.4f} , energy: {:.4f}, magnetization: {:.4f}'.format(time, energy_exp, magnetization.real))
                 energy_dic['time'].append(time)
                 energy_dic['energy expectation value'].append(energy_exp.real)
+                energy_dic['total magnetization'].append(magnetization.real)
             else:
                 right_sweep = False
 
