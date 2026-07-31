@@ -14,7 +14,7 @@ Each call evolves the state for a total time `t_final`, split into `num_sweep` p
 length
 
 $$
-\delta t = \frac{t_{\text{final}}}{\text{num\_sweep}},
+\delta t = \frac{t_{\text{final}}}{\text{num \ sweep}},
 $$
 
 and, when `imagine_t=True`, $\delta t \to -i\,\delta t$ (imaginary time, used to relax
@@ -32,21 +32,23 @@ period advances it by $\delta t$.
 
 For each site visited during a sweep:
 
-1. **Forward-evolve the site tensor.** The one-site reduced/effective Hamiltonian is built
-   from the left and right environment tensors $L$, $R$ and the site's MPO tensor $W$,
+#### 1. Forward-evolve the site tensor
+   
+The one-site reduced/effective Hamiltonian is built
+from the left and right environment tensors $L$, $R$ and the site's MPO tensor $W$,
 
-   $$
-   (H_{\text{eff}})_{(p\,a\,r),(q\,b\,s)} = \sum_{m,n} L_{p m q}\; W_{m a b n}\; R_{r n s},
-   $$
+$$
+(H_{\text{eff}})_{(p,a,r),(q,b,s)} = \sum_{m,n} L_{p m q}\; W_{m a b n}\; R_{r n s},
+$$
 
    and the site tensor $A_C(\text{site})$ (flattened over its left-bond/physical/right-bond
    indices) is propagated forward by $\delta t/2$:
 
-   $$
-   A_C(\text{site}) \;\leftarrow\; \exp\!\big(-i\,H_{\text{eff}}\,\delta t/2\big)\,A_C(\text{site}).
-   $$
+$$
+A_C(\text{site})  \leftarrow \exp\big(-i\,H_{\text{eff}}\,\delta t/2\big)\;A_C(\text{site}).
+$$
 
-2. **Orthogonalize** the evolved tensor via QR decomposition,
+#### 2. Orthogonalize the evolved tensor via QR decomposition,
 
    $$
    A_C(\text{site}) = Q\,C \quad(\text{sweeping right, } Q \text{ left-orthonormal}),
@@ -54,10 +56,11 @@ For each site visited during a sweep:
    A_C(\text{site}) = C\,Q \quad(\text{sweeping left, } Q \text{ right-orthonormal}),
    $$
 
-   which factors out an orthonormal site tensor $Q$ (stored in place of $A_C(\text{site})$)
-   and a bond matrix $C$.
+which factors out an orthonormal site tensor $Q$ (stored in place of $$A_C(\text{site})$$)
+and a bond matrix $C$.
 
-3. **Update the environment** (`L_env` when sweeping right, `R_env` when sweeping left)
+#### 3. Update the environment (`L_env` when sweeping right, `R_env` when sweeping left)
+
    incrementally using the newly orthogonalized site tensor $Q$, e.g. for a right sweep
 
    $$
@@ -66,7 +69,8 @@ For each site visited during a sweep:
 
    rather than recomputing $L$ (or $R$) from scratch at every site.
 
-4. **Backward-evolve the bond matrix.** The zero-site (bond) effective Hamiltonian omits
+#### 4. Backward-evolve the bond matrix: The zero-site (bond) effective Hamiltonian omits
+
    the local MPO operator entirely,
 
    $$
@@ -78,7 +82,7 @@ For each site visited during a sweep:
    update injected at that bond:
 
    $$
-   C \;\leftarrow\; \exp\!\big(+i\,K_{\text{eff}}\,\delta t/2\big)\,C,
+   C \leftarrow \exp\big(+i\,K_{\text{eff}}\,\delta t/2\big)\;C,
    $$
 
    after which $C$ is absorbed into the neighboring (not-yet-visited) site tensor.
@@ -86,7 +90,7 @@ For each site visited during a sweep:
 Steps 1–4 realize the symmetric Lie–Trotter splitting of the tangent-space projector into
 alternating single-site ($H_{\text{eff}}$, forward half-step) and single-bond
 ($K_{\text{eff}}$, backward half-step) propagators. This is the defining feature of 1-site
-TDVP: because every propagator $\exp(-iH_{\text{eff}}\tau)$/$\exp(-iK_{\text{eff}}\tau)$ is
+TDVP: because every propagator $$\exp(-iH_{\text{eff}}\tau)$$ / $$\exp(-iK_{\text{eff}}\tau)$$ is
 unitary, the MPS norm is conserved exactly and the bond dimension $D$ never grows, unlike
 Trotter-Suzuki gate application followed by truncation.
 
