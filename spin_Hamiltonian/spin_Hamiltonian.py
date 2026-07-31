@@ -506,7 +506,9 @@ class spin_Hamiltonian(object):
         df = pd.DataFrame(energy_dic)
         df.to_csv("spin_Hamiltonain_DMRG_GS_search_data.csv", index=False)
 
-    def TDVP_evolution(self, t_final, num_sweep, D, imagine_t):
+        return trial_MPS
+
+    def TDVP_evolution(self, t_final, num_sweep, D, imagine_t, initial_MPS=None):
         """1-site TDVP time evolution, following the algorithm at
         https://tensornetwork.org/mps/algorithms/timeevo/tdvp.html
 
@@ -522,7 +524,10 @@ class spin_Hamiltonian(object):
         if imagine_t:
             delta_t *= (-1j)
 
-        trial_MPS = self._initialize_mps(D)
+        if initial_MPS is None:
+            trial_MPS = self._initialize_mps(D)
+        else:
+            trial_MPS = initial_MPS
         trial_MPS = self._right_canonical(trial_MPS, D)
 
         energy_dic = {
