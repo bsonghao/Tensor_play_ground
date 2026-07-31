@@ -26,9 +26,12 @@ def main():
     Jz = 1.
     chemical_shift = np.random.rand(L)
 
+    # step 1:  using large h to "prepare" as initial state with large anisotropy term Hamiltonian
+    tensor = spin_Hamiltonian(num_site=L, J=J, Jz=Jz, h=10, chemical_shift=chemical_shift)
+    initial_MPS = tensor.ground_state_search(num_sweep=2, D=4)
 
-    tensor = spin_Hamiltonian(L, J, Jz, h, chemical_shift)
-    # tensor.ground_state_search(num_sweep=2, D=14)
+    # step 2: using the prepared initial state with large anisotropy as to state the time evolution
+    tensor = spin_Hamiltonian(num_site=L, J=J, Jz=Jz, h=h, chemical_shift=chemical_shift)
     tensor.TDVP_evolution(t_final=10, num_sweep=200, D=4, imagine_t=False)
 
 
